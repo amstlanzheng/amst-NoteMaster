@@ -1,0 +1,14 @@
+node_modules/
+out/
+dist/
+release/
+pkg-out/
+pack/
+output-exe/
+output-*/
+*.mjs
+!electron.vite.config.ts
+!vite.config.ts
+notemaster-data/
+.electron-data/
+mscdex-*/

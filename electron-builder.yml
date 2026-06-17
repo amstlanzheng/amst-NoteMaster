@@ -1,0 +1,33 @@
+appId: com.notemaster.app
+productName: NoteMaster
+directories:
+  output: ${env.BUILD_OUTPUT}
+electronDist: node_modules/electron/dist
+electronDownload:
+  mirror: https://npmmirror.com/mirrors/electron/
+files:
+  - dist/**/*
+  - out/**/*
+  - package.json
+  - node_modules/**/*
+  - "!node_modules/.cache/**"
+asar: true
+asarUnpack:
+  - node_modules/sql.js/**
+  - node_modules/ssh2-sftp-client/**
+  - node_modules/ssh2/**
+  - node_modules/cpu-features/**
+  - node_modules/buildcheck/**
+win:
+  target:
+    - nsis
+  icon: resources/icon.png
+  signAndEditExecutable: false
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+extraResources:
+  - from: resources/
+    to: resources/

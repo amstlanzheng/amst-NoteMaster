@@ -3,11 +3,13 @@ import { ref, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useNoteStore } from '../../stores/note'
 import { useCategoryStore } from '../../stores/category'
+import { useTagStore } from '../../stores/tag'
 import { formatRelative, stripMarkdown, truncate } from '../../utils/format'
 import type { Note } from '@shared/types'
 
 const noteStore = useNoteStore()
 const categoryStore = useCategoryStore()
+const tagStore = useTagStore()
 
 const noteContextMenu = ref({ visible: false, x: 0, y: 0, note: null as Note | null })
 const batchMode = ref(false)
@@ -28,6 +30,25 @@ const currentCategoryName = computed(() => {
     return null
   }
   return findName(categoryStore.categories) || '未分类'
+})
+
+// 组合显示当前筛选条件（分类 + 标签）
+const currentFilterTitle = computed(() => {
+  let title = currentCategoryName.value
+  
+  // 如果有标签筛选，追加标签名称
+  const tagId = noteStore.filters.tag_id
+  if (tagId && tagId !== 0) {
+    // 从 tagStore 中查找标签名称
+    const tag = tagStore.tags.find(t => t.id === tagId)
+    if (tag) {
+      title += ` / 标签： ${tag.name}`
+    }
+  } else if (tagId === 0) {
+    title += ' / 无标签'
+  }
+  
+  return title
 })
 
 // 获取笔记所属的子分类名称（如果当前选中的是父分类）
@@ -216,7 +237,7 @@ async function batchDelete() {
 <template>
   <div class="note-list">
     <div class="list-header">
-      <span class="list-title">{{ currentCategoryName }}</span>
+      <span class="list-title">{{ currentFilterTitle }}</span>
       <div class="header-actions">
         <el-button v-if="!batchMode" size="small" text @click="toggleBatchMode">批量</el-button>
         <template v-if="batchMode">

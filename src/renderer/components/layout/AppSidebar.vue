@@ -302,7 +302,27 @@ async function catMenuDelete() {
 function handleTagContextMenu(event: MouseEvent, tag: { id: number; name: string; color: string }) {
   event.preventDefault()
   event.stopPropagation()
-  tagContextMenu.value = { visible: true, x: event.clientX, y: event.clientY, tag }
+  
+  // 计算菜单位置，避免超出窗口边界
+  const menuHeight = 160 // 预估菜单高度
+  const menuWidth = 160  // 预估菜单宽度
+  const viewportHeight = window.innerHeight
+  const viewportWidth = window.innerWidth
+  
+  let x = event.clientX
+  let y = event.clientY
+  
+  // 如果菜单会超出底部，向上显示
+  if (y + menuHeight > viewportHeight) {
+    y = Math.max(0, viewportHeight - menuHeight)
+  }
+  
+  // 如果菜单会超出右侧，向左显示
+  if (x + menuWidth > viewportWidth) {
+    x = Math.max(0, viewportWidth - menuWidth)
+  }
+  
+  tagContextMenu.value = { visible: true, x, y, tag }
   setTimeout(() => { document.addEventListener('click', closeTagMenu, { once: true }) }, 0)
 }
 

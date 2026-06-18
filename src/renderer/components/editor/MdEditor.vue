@@ -529,8 +529,31 @@ function removeImage(img: Base64Image) {
 .preview-pane :deep(h2) { font-size: 22px; margin: 16px 0 8px; }
 .preview-pane :deep(h3) { font-size: 18px; margin: 12px 0 6px; }
 .preview-pane :deep(p) { margin: 8px 0; }
-.preview-pane :deep(pre) { background: var(--bg-secondary); padding: 16px; border-radius: 8px; overflow-x: auto; margin: 12px 0; }
-.preview-pane :deep(code) { font-family: 'Cascadia Code', 'Fira Code', monospace; font-size: 13px; }
+.preview-pane :deep(pre) { 
+  background: var(--bg-secondary); 
+  padding: 16px; 
+  border-radius: 8px; 
+  overflow-x: auto; 
+  margin: 12px 0;
+  font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.preview-pane :deep(pre code) { 
+  font-family: inherit;
+  font-size: inherit;
+  color: var(--text-primary);
+  background: transparent;
+  padding: 0;
+}
+.preview-pane :deep(code) { 
+  font-family: 'Cascadia Code', 'Fira Code', monospace; 
+  font-size: 13px;
+  background: var(--bg-secondary);
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: var(--text-primary);
+}
 .preview-pane :deep(blockquote) { border-left: 3px solid var(--accent-color); padding-left: 16px; margin: 12px 0; color: var(--text-secondary); }
 .preview-pane :deep(table) { border-collapse: collapse; width: 100%; margin: 12px 0; }
 .preview-pane :deep(th), .preview-pane :deep(td) { border: 1px solid var(--border-color); padding: 8px 12px; text-align: left; }

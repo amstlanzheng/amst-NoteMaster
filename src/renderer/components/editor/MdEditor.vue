@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { ref, watch, computed } from 'vue'
+import { ref, watch, computed, nextTick } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Picture, Delete, Close, View } from '@element-plus/icons-vue'
 import { useNoteStore } from '../../stores/note'
 import { useTagStore } from '../../stores/tag'
 import { renderMarkdown } from '../../utils/markdown'
@@ -12,6 +14,9 @@ const editTitle = ref('')
 const editContent = ref('')
 const editMode = ref<'edit' | 'preview' | 'split'>('edit')
 const contentType = ref<'markdown' | 'html'>('markdown')
+
+// 是否启用不换行模式（Base64 文本单行显示）
+const noWrapMode = ref(true)
 const autoSaveTimer = ref<ReturnType<typeof setTimeout> | null>(null)
 
 const previewHtml = computed(() => {
@@ -20,6 +25,43 @@ const previewHtml = computed(() => {
 })
 
 const noteTags = ref<Tag[]>([])
+
+// Base64 图片列表
+interface Base64Image {
+  index: number
+  format: string
+  size: string
+  fullMatch: string
+  base64: string
+  dataUrl: string
+}
+
+const base64Images = computed<Base64Image[]>(() => {
+  const images: Base64Image[] = []
+  const regex = /!\[\]\(data:image\/(\w+);base64,([A-Za-z0-9+/=]+)\)/g
+  let match
+  
+  while ((match = regex.exec(editContent.value)) !== null) {
+    const format = match[1].toUpperCase()
+    const base64Data = match[2]
+    // Base64 大小约为原始数据的 1.33 倍
+    const sizeBytes = Math.round((base64Data.length * 0.75))
+    const sizeKB = (sizeBytes / 1024).toFixed(1)
+    
+    images.push({
+      index: match.index,
+      format,
+      size: `${sizeKB}KB`,
+      fullMatch: match[0],
+      base64: base64Data,
+      dataUrl: `data:image/${match[1].toLowerCase()};base64,${base64Data}`
+    })
+  }
+  
+  return images
+})
+
+const showImagePanel = ref(false)
 
 watch(() => noteStore.currentNote, (note) => {
   if (note) {
@@ -89,6 +131,58 @@ function insertMarkdown(syntax: string) {
 const tagDialogVisible = ref(false)
 const tagSearch = ref('')
 
+// 分栏同步滚动
+const editPaneRef = ref<HTMLElement>()
+const previewPaneRef = ref<HTMLElement>()
+let isSyncingScroll = false
+
+// 将 Base64 图片转换为简短占位符（用于显示）
+function compressBase64InDisplay(content: string): string {
+  return content.replace(
+    /!\[\]\(data:image\/(\w+);base64,[A-Za-z0-9+/=]+\)/g,
+    (match, format) => {
+      const upperFormat = format.toUpperCase()
+      return `[图片:${upperFormat}]`
+    }
+  )
+}
+
+function onEditPaneScroll() {
+  if (isSyncingScroll || !previewPaneRef.value || editMode.value !== 'split') return
+  isSyncingScroll = true
+  
+  const editPane = editPaneRef.value!
+  const previewPane = previewPaneRef.value!
+  
+  // 计算滚动比例
+  const scrollRatio = editPane.scrollTop / (editPane.scrollHeight - editPane.clientHeight)
+  
+  // 同步到预览区
+  previewPane.scrollTop = scrollRatio * (previewPane.scrollHeight - previewPane.clientHeight)
+  
+  nextTick(() => {
+    isSyncingScroll = false
+  })
+}
+
+function onPreviewPaneScroll() {
+  if (isSyncingScroll || !editPaneRef.value || editMode.value !== 'split') return
+  isSyncingScroll = true
+  
+  const editPane = editPaneRef.value!
+  const previewPane = previewPaneRef.value!
+  
+  // 计算滚动比例
+  const scrollRatio = previewPane.scrollTop / (previewPane.scrollHeight - previewPane.clientHeight)
+  
+  // 同步到编辑区
+  editPane.scrollTop = scrollRatio * (editPane.scrollHeight - editPane.clientHeight)
+  
+  nextTick(() => {
+    isSyncingScroll = false
+  })
+}
+
 const availableTags = computed(() => {
   const noteTagIds = new Set(noteTags.value.map(t => t.id))
   return tagStore.tags.filter(t => !noteTagIds.has(t.id) &&
@@ -121,30 +215,73 @@ async function handlePasteImage(event: ClipboardEvent) {
       event.preventDefault()
       const blob = item.getAsFile()
       if (!blob) continue
-      const buffer = await blob.arrayBuffer()
-      const noteId = noteStore.currentNote?.id || 0
+      
+      // 检查图片大小（限制 1MB）
+      const maxSize = 1024 * 1024 // 1MB
+      if (blob.size > maxSize) {
+        ElMessage.warning(`图片大小超过限制（${(blob.size / 1024 / 1024).toFixed(2)}MB > 1MB），请压缩后再粘贴`)
+        break
+      }
+      
+      // 将图片转换为 Base64
       try {
-        const result = await window.api.saveLocalFile({
-          buffer: Array.from(new Uint8Array(buffer)),
-          filename: blob.name || 'paste.png',
-          noteId
-        })
-        if (result.path) {
-          const mdImg = `\n![](${result.path})\n`
-          editContent.value += mdImg
-          triggerAutoSave()
-        }
-      } catch {
-        const reader = new FileReader()
-        reader.onload = (e) => {
-          editContent.value += `\n![](${e.target?.result})\n`
-          triggerAutoSave()
-        }
-        reader.readAsDataURL(blob)
+        const base64 = await fileToBase64(blob)
+        const mdImg = `\n![](${base64})\n`
+        editContent.value += mdImg
+        triggerAutoSave()
+        ElMessage.success('图片已插入（Base64 格式）')
+      } catch (error) {
+        console.error('Failed to convert image to Base64:', error)
+        ElMessage.error('图片转换失败')
       }
       break
     }
   }
+}
+
+// 将 File/Blob 转换为 Base64
+function fileToBase64(file: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result as string)
+    reader.onerror = reject
+    reader.readAsDataURL(file)
+  })
+}
+
+// 显示图片详情
+function showImageDetail(img: Base64Image) {
+  ElMessageBox({
+    title: `图片详情 (${img.format}, ${img.size})`,
+    message: `
+      <div style="text-align: center;">
+        <img src="${img.dataUrl}" style="max-width: 100%; max-height: 400px; border-radius: 8px;" />
+        <p style="margin-top: 12px; color: var(--text-secondary);">格式: ${img.format} | 大小: ${img.size}</p>
+      </div>
+    `,
+    dangerouslyUseHTMLString: true,
+    confirmButtonText: '关闭'
+  })
+}
+
+// 删除图片
+function removeImage(img: Base64Image) {
+  ElMessageBox.confirm(
+    `确定要删除这张图片吗？（${img.format}, ${img.size}）`,
+    '删除图片',
+    {
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+      type: 'warning'
+    }
+  ).then(() => {
+    // 从内容中移除该图片的 Markdown 语法
+    editContent.value = editContent.value.replace(img.fullMatch, '')
+    triggerAutoSave()
+    ElMessage.success('图片已删除')
+  }).catch(() => {
+    // 用户取消
+  })
 }
 </script>
 
@@ -174,6 +311,23 @@ async function handlePasteImage(event: ClipboardEvent) {
           <el-option label="Markdown" value="markdown" />
           <el-option label="HTML" value="html" />
         </el-select>
+        <el-button 
+          size="small" 
+          :type="noWrapMode ? 'primary' : 'default'"
+          @click="noWrapMode = !noWrapMode"
+          title="切换不换行模式"
+        >
+          <el-icon><View /></el-icon>
+          {{ noWrapMode ? '不换行' : '自动换行' }}
+        </el-button>
+        <el-button 
+          size="small" 
+          :type="showImagePanel ? 'primary' : 'default'"
+          @click="showImagePanel = !showImagePanel"
+        >
+          <el-icon><Picture /></el-icon>
+          图片 {{ base64Images.length > 0 ? `(${base64Images.length})` : '' }}
+        </el-button>
         <el-button size="small" @click="showTagDialog">标签</el-button>
         <el-button size="small" :type="noteStore.currentNote.is_favorite ? 'warning' : 'default'"
           @click="toggleFavorite">⭐</el-button>
@@ -187,11 +341,51 @@ async function handlePasteImage(event: ClipboardEvent) {
     <input v-model="editTitle" class="editor-title" placeholder="笔记标题..." @input="triggerAutoSave" />
 
     <div class="editor-content" :class="`mode-${editMode}`">
-      <div class="edit-pane" v-if="editMode !== 'preview'">
-        <textarea v-model="editContent" class="edit-textarea" placeholder="开始写作..." @input="triggerAutoSave" @paste="handlePasteImage" />
+      <div class="edit-pane" v-if="editMode !== 'preview'" ref="editPaneRef" @scroll="onEditPaneScroll">
+        <textarea 
+          v-model="editContent" 
+          :class="['edit-textarea', { 'no-wrap': noWrapMode }]" 
+          placeholder="开始写作..." 
+          @input="triggerAutoSave" 
+          @paste="handlePasteImage"
+        />
       </div>
-      <div class="preview-pane" v-if="editMode !== 'edit'"
+      <div class="preview-pane" v-if="editMode !== 'edit'" ref="previewPaneRef" @scroll="onPreviewPaneScroll"
         v-html="previewHtml" />
+    </div>
+
+    <!-- Base64 图片列表面板 -->
+    <div v-if="showImagePanel && base64Images.length > 0" class="image-panel">
+      <div class="image-panel-header">
+        <span class="image-panel-title">Base64 图片 ({{ base64Images.length }})</span>
+        <el-button size="small" text @click="showImagePanel = false">
+          <el-icon><Close /></el-icon>
+        </el-button>
+      </div>
+      <div class="image-list">
+        <div 
+          v-for="(img, index) in base64Images" 
+          :key="index"
+          class="image-item"
+          @click="showImageDetail(img)"
+        >
+          <div class="image-preview">
+            <img :src="img.dataUrl" :alt="`图片 ${index + 1}`" />
+          </div>
+          <div class="image-info">
+            <span class="image-format">{{ img.format }}</span>
+            <span class="image-size">{{ img.size }}</span>
+          </div>
+          <el-button 
+            size="small" 
+            type="danger" 
+            text
+            @click.stop="removeImage(img)"
+          >
+            <el-icon><Delete /></el-icon>
+          </el-button>
+        </div>
+      </div>
     </div>
 
     <div class="note-tags-bar" v-if="noteTags.length">
@@ -298,6 +492,8 @@ async function handlePasteImage(event: ClipboardEvent) {
 
 .edit-pane, .preview-pane {
   overflow: auto;
+  /* 启用平滑滚动 */
+  scroll-behavior: smooth;
 }
 
 .edit-textarea {
@@ -312,6 +508,12 @@ async function handlePasteImage(event: ClipboardEvent) {
   line-height: 1.8;
   color: var(--text-primary);
   background: transparent;
+}
+
+/* 不换行模式：Base64 文本单行显示 + 横向滚动 */
+.edit-textarea.no-wrap {
+  white-space: pre; /* 保持空格和换行，但不自动换行 */
+  overflow-x: auto; /* 启用横向滚动 */
 }
 
 .edit-textarea::placeholder {
@@ -335,6 +537,85 @@ async function handlePasteImage(event: ClipboardEvent) {
 .preview-pane :deep(th) { background: var(--bg-secondary); }
 .preview-pane :deep(a) { color: var(--accent-color); }
 .preview-pane :deep(img) { max-width: 100%; border-radius: 8px; }
+
+/* Base64 图片列表面板 */
+.image-panel {
+  max-height: 300px;
+  overflow-y: auto;
+  border-top: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+}
+
+.image-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 24px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.image-panel-title {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.image-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 12px 24px;
+}
+
+.image-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.image-item:hover {
+  border-color: var(--accent-color);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.image-preview {
+  width: 48px;
+  height: 48px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--bg-secondary);
+  flex-shrink: 0;
+}
+
+.image-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.image-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+}
+
+.image-format {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.image-size {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
 
 .note-tags-bar {
   display: flex;

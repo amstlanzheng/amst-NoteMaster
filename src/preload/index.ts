@@ -23,6 +23,7 @@ const api = {
   moveNoteToCategory: (noteId: number, categoryId: number) => ipcRenderer.invoke('db:move-note-to-category', noteId, categoryId),
   moveCategory: (catId: number, newParentId: number | null) => ipcRenderer.invoke('db:move-category', catId, newParentId),
   exportCategory: (catId: number | null) => ipcRenderer.invoke('db:export-category', catId),
+  exportCategoryFolder: (catId: number | null) => ipcRenderer.invoke('db:export-category-folder', catId),
 
   getTags: () => ipcRenderer.invoke('db:get-tags'),
   createTag: (data: Partial<Tag>) => ipcRenderer.invoke('db:create-tag', data),
@@ -54,6 +55,7 @@ const api = {
 
   saveLocalFile: (data: { buffer: number[]; filename: string; noteId: number }) => ipcRenderer.invoke('file:save-local-file', data),
   scanReferencedFiles: () => ipcRenderer.invoke('file:scan-referenced-files'),
+  cleanUnusedFiles: () => ipcRenderer.invoke('file:clean-unused-files'),
 
   testSyncConnection: (config: SftpConfig) => ipcRenderer.invoke('sync:test-connection', config),
   uploadToCloud: (config: SftpConfig) => ipcRenderer.invoke('sync:upload', config),

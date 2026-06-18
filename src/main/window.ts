@@ -1,10 +1,29 @@
-import { BrowserWindow, app, shell, nativeImage } from 'electron'
+import { BrowserWindow, app, shell, nativeImage, protocol } from 'electron'
 import { join } from 'path'
 import { existsSync } from 'fs'
 
 let mainWindow: BrowserWindow | null = null
 
 export function createMainWindow(): BrowserWindow {
+  // 注册自定义协议用于加载本地文件
+  if (!protocol.isProtocolRegistered('notemaster')) {
+    protocol.registerFileProtocol('notemaster', (request, callback) => {
+      try {
+        const url = request.url.replace(/^notemaster:\/\//, '')
+        const decodedUrl = decodeURIComponent(url)
+        // notemaster://files/xxx.png -> {userData}/notemaster-data/files/xxx.png
+        const filePath = join(app.getPath('userData'), 'notemaster-data', decodedUrl)
+        console.log('[Protocol] Request:', request.url)
+        console.log('[Protocol] Mapped to:', filePath)
+        console.log('[Protocol] Exists:', existsSync(filePath))
+        callback({ path: filePath })
+      } catch (error) {
+        console.error('[Protocol] Error:', error)
+        callback({ error: -2 }) // net::ERR_FAILED
+      }
+    })
+  }
+
   // 加载应用图标
   const iconPath = join(__dirname, '../../resources/icon.png')
   let icon: any = undefined

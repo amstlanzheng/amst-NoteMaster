@@ -3,7 +3,7 @@ import { getAll, getOne, run, saveDb, getDb, getDbPath, initDatabase } from './d
 import { testSftpConnection, uploadAllToRemote, downloadAllFromRemote, setTempSftpConfig } from './sftp'
 import { getMainWindow } from './window'
 import { join, basename } from 'path'
-import { writeFileSync, mkdirSync, existsSync, readFileSync, readdirSync, statSync } from 'fs'
+import { writeFileSync, mkdirSync, existsSync, readFileSync, readdirSync, statSync, unlinkSync, copyFileSync } from 'fs'
 import type { Note, Category, Tag, NoteVersion, SearchHistory, FilterOptions, SftpConfig } from '../shared/types'
 
 function registerIpcHandlers() {
@@ -599,9 +599,114 @@ th{background:#f5f5f5}img{max-width:100%}
     return { title: catName, notes: notesData, count: total }
   })
 
+  // 导出分类为文件夹（包含图片）
+  ipcMain.handle('db:export-category-folder', async (_event, catId: number | null) => {
+    const allCats = getAll('SELECT * FROM categories') as Category[]
+    const allNotes = getAll('SELECT * FROM notes WHERE is_deleted = 0')
+
+    function getAllDescendantIds(rootId: number): Set<number> {
+      const ids = new Set<number>([rootId])
+      let changed = true
+      while (changed) {
+        changed = false
+        for (const c of allCats) {
+          if (c.parent_id && ids.has(c.parent_id) && !ids.has(c.id)) {
+            ids.add(c.id)
+            changed = true
+          }
+        }
+      }
+      return ids
+    }
+
+    function getCategoryPath(categoryId: number): string {
+      const path: string[] = []
+      let current: any = allCats.find(c => c.id === categoryId)
+      while (current) {
+        path.unshift(current.name)
+        if (current.parent_id) {
+          current = allCats.find(c => c.id === current.parent_id)
+        } else {
+          break
+        }
+      }
+      return path.join('/')
+    }
+
+    let filteredNotes
+    if (catId === null) {
+      filteredNotes = allNotes.filter((n: any) => !n.category_id)
+    } else {
+      const allDescIds = getAllDescendantIds(catId)
+      filteredNotes = allNotes.filter((n: any) => n.category_id && allDescIds.has(n.category_id))
+    }
+
+    const catName = catId ? (allCats.find(c => c.id === catId)?.name || '分类') : '未分类'
+    const baseDir = join(app.getPath('userData'), 'notemaster-data', 'files')
+    
+    // 提取所有笔记中的图片文件
+    const imageFiles = new Set<string>()
+    const regex = /notemaster-data\/files\/([^\s\)"']+)/g
+    
+    filteredNotes.forEach((note: any) => {
+      let m
+      while ((m = regex.exec(note.content || '')) !== null) {
+        imageFiles.add(m[1])
+      }
+    })
+
+    // 构建导出数据
+    const notesData = filteredNotes.map((note: any) => {
+      const tags = getAll('SELECT t.* FROM tags t INNER JOIN note_tags nt ON t.id = nt.tag_id WHERE nt.note_id = ?', [note.id])
+      const tagNames = (tags as any[]).map(t => t.name).join(', ')
+      let frontmatter = `---\ntitle: "${note.title}"\ndate: ${note.updated_at}\n`
+      if (tagNames) frontmatter += `tags: [${tagNames}]\n`
+      frontmatter += `---\n\n`
+      
+      // 替换图片路径为相对路径
+      let content = note.content || ''
+      content = content.replace(/notemaster-data\/files\/([^\s\)"']+)/g, 'images/$1')
+      
+      const categoryPath = note.category_id ? getCategoryPath(note.category_id) : ''
+      
+      return {
+        filename: `${note.title.replace(/[\\/:*?"<>|]/g, '_')}.md`,
+        content: frontmatter + content,
+        categoryPath
+      }
+    })
+
+    // 准备图片文件列表（读取为 Base64）
+    const images = Array.from(imageFiles).filter(filename => {
+      const filePath = join(baseDir, filename)
+      return existsSync(filePath)
+    }).map(filename => {
+      const filePath = join(baseDir, filename)
+      try {
+        const buffer = readFileSync(filePath)
+        const base64 = buffer.toString('base64')
+        return {
+          filename,
+          base64,
+          path: filePath
+        }
+      } catch (error) {
+        console.error(`Failed to read image ${filename}:`, error)
+        return null
+      }
+    }).filter(img => img !== null) as Array<{ filename: string; base64: string; path: string }>
+
+    return { 
+      title: catName, 
+      notes: notesData, 
+      images,
+      count: filteredNotes.length 
+    }
+  })
+
   ipcMain.handle('file:save-local-file', (_event, data: { buffer: number[]; filename: string; noteId: number }) => {
     try {
-      const baseDir = existsSync('/notemaster-data') ? '/notemaster-data/files' : join(process.cwd(), 'notemaster-data', 'files')
+      const baseDir = join(app.getPath('userData'), 'notemaster-data', 'files')
       if (!existsSync(baseDir)) mkdirSync(baseDir, { recursive: true })
       const ext = data.filename.includes('.') ? data.filename.substring(data.filename.lastIndexOf('.')) : '.png'
       const newFilename = `note_${data.noteId}_${Date.now()}${ext}`
@@ -614,7 +719,7 @@ th{background:#f5f5f5}img{max-width:100%}
   })
 
   ipcMain.handle('file:scan-referenced-files', (_event) => {
-    const baseDir = existsSync('/notemaster-data') ? '/notemaster-data/files' : join(process.cwd(), 'notemaster-data', 'files')
+    const baseDir = join(app.getPath('userData'), 'notemaster-data', 'files')
     if (!existsSync(baseDir)) return []
 
     const notes = getAll('SELECT content FROM notes WHERE is_deleted = 0')
@@ -640,6 +745,75 @@ th{background:#f5f5f5}img{max-width:100%}
     return allFiles.filter(f => referenced.has(f))
   })
 
+  ipcMain.handle('file:clean-unused-files', (_event) => {
+    const baseDir = join(app.getPath('userData'), 'notemaster-data', 'files')
+    if (!existsSync(baseDir)) return { deletedCount: 0, deletedFiles: [], totalSize: 0 }
+
+    // 获取所有被引用的文件
+    const notes = getAll('SELECT content FROM notes WHERE is_deleted = 0')
+    const allContent = notes.map((n: any) => n.content || '').join(' ')
+    const referenced = new Set<string>()
+    const regex = /notemaster-data\/files\/([^\s\)"]+)/g
+    let m
+    while ((m = regex.exec(allContent)) !== null) {
+      referenced.add(m[1])
+    }
+
+    // 扫描所有文件
+    const allFiles: Array<{ name: string; path: string; size: number }> = []
+    function walk(dir: string) {
+      const items = readdirSync(dir)
+      for (const item of items) {
+        const full = join(dir, item)
+        const stats = statSync(full)
+        if (stats.isDirectory()) {
+          walk(full)
+        } else {
+          allFiles.push({ name: item, path: full, size: stats.size })
+        }
+      }
+    }
+    walk(baseDir)
+
+    // 删除未引用的文件
+    const deletedFiles: string[] = []
+    let totalSize = 0
+    for (const file of allFiles) {
+      if (!referenced.has(file.name)) {
+        try {
+          unlinkSync(file.path)
+          deletedFiles.push(file.name)
+          totalSize += file.size
+        } catch (e) {
+          console.error(`Failed to delete file ${file.name}:`, e)
+        }
+      }
+    }
+
+    // 清理空目录
+    function cleanEmptyDirs(dir: string) {
+      const items = readdirSync(dir)
+      for (const item of items) {
+        const full = join(dir, item)
+        if (statSync(full).isDirectory()) {
+          cleanEmptyDirs(full)
+          try {
+            if (readdirSync(full).length === 0) {
+              ;(require('fs') as any).rmdirSync(full)
+            }
+          } catch {}
+        }
+      }
+    }
+    cleanEmptyDirs(baseDir)
+
+    return {
+      deletedCount: deletedFiles.length,
+      deletedFiles,
+      totalSize
+    }
+  })
+
   ipcMain.handle('sync:test-connection', async (_event, config: SftpConfig) => {
     setTempSftpConfig(config)
     return testSftpConnection(config)
@@ -648,7 +822,7 @@ th{background:#f5f5f5}img{max-width:100%}
   ipcMain.handle('sync:upload', async (_event, config: SftpConfig) => {
     setTempSftpConfig(config)
     const dbFilePath = getDbPath()
-    const filesDir = existsSync('/notemaster-data') ? '/notemaster-data/files' : join(process.cwd(), 'notemaster-data', 'files')
+    const filesDir = join(app.getPath('userData'), 'notemaster-data', 'files')
     let refs: string[] = []
     if (existsSync(filesDir)) {
       function walkDir(dir: string, base: string): string[] {
@@ -673,7 +847,7 @@ th{background:#f5f5f5}img{max-width:100%}
   ipcMain.handle('sync:download', async (_event, config: SftpConfig) => {
     setTempSftpConfig(config)
     const localDbPath = getDbPath()
-    const filesDir = existsSync('/notemaster-data') ? '/notemaster-data/files' : join(process.cwd(), 'notemaster-data', 'files')
+    const filesDir = join(app.getPath('userData'), 'notemaster-data', 'files')
     const result = await downloadAllFromRemote(config, localDbPath, filesDir)
     if (result.ok && result.dbOk) {
       await initDatabase()

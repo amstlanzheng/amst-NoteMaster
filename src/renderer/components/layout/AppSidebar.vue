@@ -166,6 +166,17 @@ async function catMenuExport() {
   console.log('[Export] Starting export for category:', cat.name, 'id:', cat.id)
   
   try {
+    // 显示确认对话框
+    await ElMessageBox.confirm(
+      `将导出分类「${cat.name}」及其所有笔记和图片到 ZIP 压缩包中。`,
+      '导出分类',
+      {
+        confirmButtonText: '开始导出',
+        cancelButtonText: '取消',
+        type: 'info'
+      }
+    )
+    
     // 显示进度对话框
     let progressMsg: any = null
     
@@ -189,16 +200,15 @@ async function catMenuExport() {
     const cleanup = window.api.onExportProgress(handleProgress)
     
     try {
-      console.log('[Export] Calling exportCategory API...')
-      const result = await window.api.exportCategory(cat.id)
-      console.log('[Export] API result:', JSON.stringify(result, null, 2))
+      console.log('[Export] Calling exportCategoryFolder API...')
+      const result = await window.api.exportCategoryFolder(cat.id)
+      console.log('[Export Folder] API result:', JSON.stringify(result, null, 2))
       
       if (result && result.notes && result.notes.length > 0) {
-        console.log('[Export] Notes count:', result.notes.length)
-        // ZIP 模式：使用 JSZip，并体现文件夹分级
-        await exportAsZipWithFolders(result.title, result.notes)
+        console.log('[Export Folder] Notes count:', result.notes.length, 'Images count:', result.images?.length || 0)
+        await exportAsFolder(result.title, result.notes, result.images || [])
       } else {
-        console.error('[Export] No notes in result:', result)
+        console.error('[Export Folder] No notes in result:', result)
         const noteCount = result?.notes?.length || 0
         ElMessage.warning(`该分类下没有找到笔记（共 ${noteCount} 篇）`)
       }
@@ -283,6 +293,111 @@ async function exportAsZipWithFolders(folderName: string, notes: Array<{ filenam
   } catch (error) {
     console.error('[Export ZIP] Error:', error)
     ElMessage.error('导出 ZIP 失败：' + (error as Error).message)
+  }
+}
+
+// 导出为文件夹（包含图片）
+async function exportAsFolder(
+  folderName: string,
+  notes: Array<{ filename: string; content: string; categoryPath?: string }>,
+  images: Array<{ filename: string; base64: string; path: string }>
+) {
+  console.log('[Export Folder] Starting folder export, notes count:', notes.length, 'images count:', images.length)
+  
+  try {
+    // 尝试从本地导入 JSZip
+    let JSZip: any
+    
+    try {
+      console.log('[Export Folder] Trying to import JSZip from local...')
+      const jszipModule = await import('jszip')
+      JSZip = jszipModule.default || jszipModule
+      console.log('[Export Folder] JSZip loaded from local')
+    } catch (importError) {
+      console.warn('[Export Folder] Local import failed, trying CDN...', importError)
+      // 降级方案：从 CDN 加载
+      if (!(window as any).JSZip) {
+        await new Promise((resolve, reject) => {
+          const script = document.createElement('script')
+          script.src = 'https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js'
+          script.onload = () => {
+            console.log('[Export Folder] JSZip loaded from CDN')
+            resolve(true)
+          }
+          script.onerror = (err) => {
+            console.error('[Export Folder] CDN load failed', err)
+            reject(err)
+          }
+          document.head.appendChild(script)
+        })
+      }
+      JSZip = (window as any).JSZip
+    }
+    
+    if (!JSZip) {
+      throw new Error('JSZip 加载失败')
+    }
+    
+    const zip = new JSZip()
+    console.log('[Export Folder] Creating ZIP archive with folder structure...')
+    
+    // 创建文件夹结构
+    const rootFolder = zip.folder(folderName)
+    if (!rootFolder) throw new Error('创建根文件夹失败')
+    
+    // 添加所有笔记文件，按分类路径组织
+    for (let i = 0; i < notes.length; i++) {
+      const note = notes[i]
+      let filePath = note.filename
+      if (note.categoryPath) {
+        filePath = `${note.categoryPath}/${note.filename}`
+      }
+      rootFolder.file(filePath, note.content)
+      console.log(`[Export Folder] Added note ${i + 1}/${notes.length}:`, filePath)
+    }
+    
+    // 添加图片文件夹和图片文件
+    if (images.length > 0) {
+      const imagesFolder = rootFolder.folder('images')
+      if (!imagesFolder) throw new Error('创建图片文件夹失败')
+      
+      for (let i = 0; i < images.length; i++) {
+        const image = images[i]
+        try {
+          // 将 Base64 转换为 Blob
+          const binaryString = atob(image.base64)
+          const bytes = new Uint8Array(binaryString.length)
+          for (let j = 0; j < binaryString.length; j++) {
+            bytes[j] = binaryString.charCodeAt(j)
+          }
+          const blob = new Blob([bytes])
+          
+          imagesFolder.file(image.filename, blob)
+          console.log(`[Export Folder] Added image ${i + 1}/${images.length}:`, image.filename)
+        } catch (error) {
+          console.error(`[Export Folder] Failed to add image ${image.filename}:`, error)
+        }
+      }
+    }
+    
+    console.log('[Export Folder] Generating ZIP blob...')
+    // 生成 ZIP 文件
+    const blob = await zip.generateAsync({ type: 'blob' })
+    console.log('[Export Folder] ZIP blob generated, size:', blob.size, 'bytes')
+    
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${folderName}-${notes.length}篇笔记.zip`
+    console.log('[Export Folder] Triggering download:', a.download)
+    a.click()
+    URL.revokeObjectURL(url)
+    
+    ElMessage.success(`已导出文件夹：${folderName}（${notes.length} 篇笔记，${images.length} 张图片）`)
+    console.log('[Export Folder] Export completed successfully')
+  } catch (error) {
+    console.error('[Export Folder] Error:', error)
+    ElMessage.error('导出文件夹失败：' + (error as Error).message)
   }
 }
 
@@ -610,7 +725,7 @@ const isActive = (path: string) => route.path === path
           <el-icon><Star /></el-icon> {{ catContextMenu.cat?.is_favorite ? '取消收藏' : '收藏文件夹' }}
         </div>
         <div class="context-menu-item" @click="catMenuExport">
-          <el-icon><Download /></el-icon> 导出 .md
+          <el-icon><Download /></el-icon> 导出
         </div>
         <div class="context-menu-divider"></div>
         <div class="context-menu-item danger" @click="catMenuDelete">

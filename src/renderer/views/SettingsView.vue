@@ -15,6 +15,8 @@ const tagStore = useTagStore()
 const importing = ref(false)
 const importResult = ref('')
 const dbPath = ref('')
+const cleaningFiles = ref(false)
+const cleanResult = ref('')
 
 const syncConfig = ref<SftpConfig>({ host: '', port: 22, username: '', password: '', remotePath: '/notemaster-data' })
 const syncAuthMode = ref<'password' | 'key'>('password')
@@ -198,6 +200,46 @@ async function clearAllData() {
     ElMessage.success('所有数据已清除')
     await Promise.all([noteStore.fetchNotes(), categoryStore.fetchCategories(), tagStore.fetchTags()])
   } catch { /* cancel */ }
+}
+
+async function cleanUnusedFiles() {
+  try {
+    const result = await ElMessageBox.confirm(
+      '此操作将扫描并删除所有未被笔记引用的图片/附件文件。操作不可撤销，建议先备份重要数据。',
+      '清除未引用文件',
+      { 
+        confirmButtonText: '确认清除', 
+        cancelButtonText: '取消', 
+        type: 'warning',
+        confirmButtonClass: 'el-button--danger'
+      }
+    )
+    
+    if (result === 'confirm') {
+      cleaningFiles.value = true
+      cleanResult.value = ''
+      
+      try {
+        const res = await window.api.cleanUnusedFiles()
+        const sizeMB = (res.totalSize / (1024 * 1024)).toFixed(2)
+        
+        if (res.deletedCount > 0) {
+          cleanResult.value = `成功清理 ${res.deletedCount} 个文件，释放 ${sizeMB} MB 空间`
+          ElMessage.success(cleanResult.value)
+        } else {
+          cleanResult.value = '没有发现未引用的文件'
+          ElMessage.info(cleanResult.value)
+        }
+      } catch (e: any) {
+        cleanResult.value = '清理失败: ' + (e.message || '未知错误')
+        ElMessage.error(cleanResult.value)
+      } finally {
+        cleaningFiles.value = false
+      }
+    }
+  } catch {
+    // 用户取消
+  }
 }
 
 async function testSyncConnection() {
@@ -394,6 +436,18 @@ function copyDbPath() {
     </el-card>
 
     <el-card class="setting-card">
+      <template #header><span>图片缓存管理</span></template>
+      <p class="desc">清理笔记中未引用的图片和附件文件，释放磁盘空间。</p>
+      <div class="setting-row">
+        <span>清除未引用文件</span>
+        <el-button type="warning" size="default" :loading="cleaningFiles" @click="cleanUnusedFiles">
+          <el-icon><Delete /></el-icon> 清理缓存
+        </el-button>
+      </div>
+      <div v-if="cleanResult" class="clean-result" :class="{ success: !cleanResult.includes('失败') }">{{ cleanResult }}</div>
+    </el-card>
+
+    <el-card class="setting-card">
       <template #header><span>云服务器同步（SSH/SFTP）</span></template>
       <p class="desc">配置 Linux 云服务器信息，同步 SQLite 数据库文件 + 笔记中引用的图片/附件。（默认不保存密码/密钥，点击“保存连接信息”后可下次自动填充）</p>
       <el-form label-position="top" size="small">
@@ -501,6 +555,8 @@ function copyDbPath() {
 .desc { font-size: 13px; color: var(--text-secondary); margin-bottom: 12px; line-height: 1.6; }
 .import-result { margin-top: 8px; padding: 8px 12px; background: var(--bg-tertiary); border-radius: var(--radius-sm); font-size: 13px; color: var(--text-secondary); }
 .import-result.success { color: #67c23a; background: rgba(103, 194, 58, 0.1); }
+.clean-result { margin-top: 8px; padding: 8px 12px; background: var(--bg-tertiary); border-radius: var(--radius-sm); font-size: 13px; color: var(--text-secondary); }
+.clean-result.success { color: #67c23a; background: rgba(103, 194, 58, 0.1); }
 .sync-actions { 
   display: flex; 
   gap: 10px; 

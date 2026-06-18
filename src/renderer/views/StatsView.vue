@@ -20,15 +20,47 @@ async function loadStats() {
   stats.value = await window.api.getStats()
 
   const catDist = await window.api.getCategoryDistribution() as { name: string; count: number }[]
+  // 过滤掉数量为0的分类
+  const filteredCatDist = catDist.filter(c => c.count > 0)
   categoryOption.value = {
-    tooltip: { trigger: 'item' },
-    legend: { bottom: 0 },
+    tooltip: { 
+      trigger: 'item',
+      formatter: '{b}: {c} ({d}%)'
+    },
+    legend: { 
+      bottom: 0,
+      type: 'scroll',
+      itemWidth: 14,
+      itemHeight: 14,
+      textStyle: {
+        fontSize: 12
+      }
+    },
     series: [{
       type: 'pie',
-      radius: ['40%', '70%'],
-      avoidLabelOverlap: false,
-      label: { show: true, position: 'outside' },
-      data: catDist.map(c => ({ name: c.name, value: c.count }))
+      radius: ['50%', '70%'],
+      center: ['50%', '45%'],
+      avoidLabelOverlap: true,
+      label: { 
+        show: true,
+        position: 'outside',
+        fontSize: 12,
+        formatter: '{b}\n{d}%'
+      },
+      labelLine: {
+        show: true,
+        length: 15,
+        length2: 10,
+        smooth: true
+      },
+      emphasis: {
+        label: {
+          show: true,
+          fontSize: 14,
+          fontWeight: 'bold'
+        }
+      },
+      data: filteredCatDist.map(c => ({ name: c.name, value: c.count }))
     }]
   }
 
@@ -81,11 +113,11 @@ onMounted(loadStats)
     <div class="charts-grid">
       <div class="chart-panel">
         <h3>分类分布</h3>
-        <VChart :option="categoryOption" style="height:300px" autoresize />
+        <VChart :option="categoryOption" style="height:400px" autoresize />
       </div>
       <div class="chart-panel">
         <h3>月度创建趋势</h3>
-        <VChart :option="trendOption" style="height:300px" autoresize />
+        <VChart :option="trendOption" style="height:400px" autoresize />
       </div>
     </div>
   </div>

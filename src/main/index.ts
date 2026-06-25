@@ -42,70 +42,73 @@ function generateTrayIcon(): string {
 }
 
 function createTrayIcon(): NativeImage {
-  // 直接生成一个 32x32 透明背景的托盘图标（蓝色圆环 + N 字母）
+  // 从 resources/icon.png 加载 AM 图标作为托盘图标
+  const iconPath = join(__dirname, '../../resources/icon.png')
+  if (existsSync(iconPath)) {
+    const fullIcon = nativeImage.createFromPath(iconPath)
+    // 缩小到托盘图标尺寸 (16x16 用于 Windows 任务栏)
+    const resized = fullIcon.resize({ width: 16, height: 16 })
+    console.log('[Tray] Loaded AM icon from:', iconPath, 'isEmpty:', resized.isEmpty(), 'size:', resized.getSize())
+    return resized
+  }
+
+  // 降级方案：生成简单的蓝色圆角矩形 + AM 图标
+  console.log('[Tray] Icon file not found, generating fallback tray icon...')
   const size = 32
-  const rgba = Buffer.alloc(size * size * 4, 0) // 默认全透明
+  const rgba = Buffer.alloc(size * size * 4, 0)
 
   const cx = 16, cy = 16
+  const radius = 13
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
       const i = (y * size + x) * 4
       const dx = x - cx, dy = y - cy
       const dist = Math.sqrt(dx * dx + dy * dy)
 
-      // 外圆环 (半径 12~14)
-      if (dist >= 11.5 && dist < 14.5) {
-        rgba[i] = 0x00; rgba[i + 1] = 0x78; rgba[i + 2] = 0xd4; rgba[i + 3] = 255
+      // 蓝色圆形背景
+      if (dist < radius) {
+        rgba[i] = 0x18; rgba[i + 1] = 0x64; rgba[i + 2] = 0xDC; rgba[i + 3] = 255
       }
-      // 内部填充圆 (半径 < 11.5) 用浅蓝
-      else if (dist < 11.5) {
-        rgba[i] = 0x33; rgba[i + 1] = 0x99; rgba[i + 2] = 0xe0; rgba[i + 3] = 255
-      }
-      // 其余保持透明
     }
   }
 
-  // 在圆心画一个白色 "N" 字母 (简化像素版)
-  const nPixels = [
-    // 左竖线 x=11
-    [11,10],[11,11],[11,12],[11,13],[11,14],[11,15],[11,16],[11,17],[11,18],[11,19],[11,20],[11,21],
-    // 右竖线 x=20
+  // 简化 AM 字母（白色像素）
+  const amPixels = [
+    // A 字母
+    [9,10],[9,11],[9,12],[9,13],[9,14],[9,15],[9,16],[9,17],[9,18],[9,19],[9,20],[9,21],
+    [10,10],[10,11],[10,12],[10,13],[10,14],[10,15],[10,16],[10,17],[10,18],[10,19],[10,20],[10,21],
+    [11,10],[12,10],[13,10],[14,10],
+    [11,11],[12,11],[13,11],[14,11],
+    [11,15],[12,15],[13,15],[14,15],[15,15],[16,15],[17,15],[18,15],
+    [11,16],[12,16],[13,16],[14,16],[15,16],[16,16],[17,16],[18,16],
+    [17,10],[17,11],[17,12],[17,13],[17,14],
+    [18,10],[18,11],[18,12],[18,13],[18,14],
+    [17,17],[17,18],[17,19],[17,20],[17,21],
+    [18,17],[18,18],[18,19],[18,20],[18,21],
+    // M 字母
     [20,10],[20,11],[20,12],[20,13],[20,14],[20,15],[20,16],[20,17],[20,18],[20,19],[20,20],[20,21],
-    // 对角线
-    [12,11],[13,12],[14,13],[15,15],[16,16],[17,17],[18,18],[19,19],
-    // 加粗左竖
-    [12,10],[12,11],[12,12],[12,13],[12,14],[12,15],[12,16],[12,17],[12,18],[12,19],[12,20],[12,21],
-    // 加粗右竖
-    [19,10],[19,11],[19,12],[19,13],[19,14],[19,15],[19,16],[19,17],[19,18],[19,19],[19,20],[19,21],
+    [21,10],[21,11],[21,12],[21,13],[21,14],[21,15],[21,16],[21,17],[21,18],[21,19],[21,20],[21,21],
+    [22,11],[22,12],[23,13],[23,14],
+    [24,15],[24,16],[24,17],
+    [25,13],[25,14],[26,11],[26,12],
+    [27,10],[27,11],[27,12],[27,13],[27,14],[27,15],[27,16],[27,17],[27,18],[27,19],[27,20],[27,21],
+    [28,10],[28,11],[28,12],[28,13],[28,14],[28,15],[28,16],[28,17],[28,18],[28,19],[28,20],[28,21],
   ]
-  for (const [px, py] of nPixels) {
+  for (const [px, py] of amPixels) {
     if (px >= 0 && px < size && py >= 0 && py < size) {
       const i = (py * size + px) * 4
       rgba[i] = 255; rgba[i + 1] = 255; rgba[i + 2] = 255; rgba[i + 3] = 255
     }
   }
 
-  // 先创建 nativeImage，再导出为 PNG 文件，最后从文件加载（最可靠的方式）
   const tempImg = nativeImage.createFromBuffer(rgba, { width: size, height: size })
   const pngBuffer = tempImg.toPNG()
   const trayPngPath = join(app.getPath('userData'), 'tray-icon.png')
-  
-  // 验证颜色是否正确（检查第一个非透明像素）
-  let firstPixelStr = ''
-  for (let i = 0; i < rgba.length; i += 4) {
-    if (rgba[i + 3] > 0) {
-      firstPixelStr = `R:${rgba[i]}, G:${rgba[i+1]}, B:${rgba[i+2]}`
-      break
-    }
-  }
-  console.log('[Tray] First non-transparent pixel:', firstPixelStr)
-  console.log('[Tray] Expected blue: R:0, G:120, B:212')
-  
   writeFileSync(trayPngPath, pngBuffer)
-  console.log('[Tray] Wrote tray PNG to:', trayPngPath, 'size:', pngBuffer.length)
-  
+  console.log('[Tray] Wrote fallback tray PNG to:', trayPngPath, 'size:', pngBuffer.length)
+
   const img = nativeImage.createFromPath(trayPngPath)
-  console.log('[Tray] Loaded tray icon from path, isEmpty:', img.isEmpty(), 'size:', img.getSize())
+  console.log('[Tray] Loaded fallback tray icon, isEmpty:', img.isEmpty(), 'size:', img.getSize())
   return img
 }
 

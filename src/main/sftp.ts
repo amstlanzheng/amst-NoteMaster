@@ -58,7 +58,7 @@ export async function testSftpConnection(config: SftpConfig): Promise<{ ok: bool
   let sftp: any = null
   try {
     sftp = await getClient(config)
-    const remotePath = config.remotePath || '/notemaster-data'
+    const remotePath = config.remotePath || '/amnote-data'
     await ensureRemoteDir(sftp, remotePath)
     await ensureRemoteDir(sftp, remotePath + '/files')
     return { ok: true, message: '云服务器连接成功' }
@@ -73,30 +73,41 @@ export async function uploadAllToRemote(
   config: SftpConfig,
   dbFilePath: string,
   filesDir: string,
-  referencedFiles: string[]
+  referencedFiles: string[],
+  onProgress?: (current: number, total: number, status: string) => void
 ): Promise<{ ok: boolean; message: string; dbOk: boolean; filesCount: number }> {
   let sftp: any = null
   try {
     sftp = await getClient(config)
-    const baseRemote = config.remotePath || '/notemaster-data'
+    const baseRemote = config.remotePath || '/amnote-data'
     await ensureRemoteDir(sftp, baseRemote)
     await ensureRemoteDir(sftp, baseRemote + '/files')
 
     let dbOk = false
     if (existsSync(dbFilePath)) {
-      await sftp.put(dbFilePath, baseRemote + '/notemaster.db')
+      if (onProgress) onProgress(0, referencedFiles.length + 1, '正在上传数据库...')
+      await sftp.put(dbFilePath, baseRemote + '/amnote.db')
       dbOk = true
+      if (onProgress) onProgress(1, referencedFiles.length + 1, '数据库上传完成')
     }
 
     let filesCount = 0
-    for (const relPath of referencedFiles) {
+    for (let i = 0; i < referencedFiles.length; i++) {
+      const relPath = referencedFiles[i]
       const localPath = join(filesDir, relPath)
       if (!existsSync(localPath)) continue
+      
       const remoteFilePath = (baseRemote + '/files/' + relPath).replace(/\\/g, '/')
       const remoteDir = remoteFilePath.substring(0, remoteFilePath.lastIndexOf('/'))
       try { await sftp.stat(remoteDir) } catch { await sftp.mkdir(remoteDir, true) }
+      
       await sftp.put(localPath, remoteFilePath)
       filesCount++
+      
+      // 每上传5个文件或最后一个文件时发送进度
+      if (onProgress && (filesCount % 5 === 0 || filesCount === referencedFiles.length)) {
+        onProgress(filesCount + 1, referencedFiles.length + 1, `正在上传文件 ${filesCount}/${referencedFiles.length}`)
+      }
     }
 
     return {
@@ -120,7 +131,7 @@ export async function downloadAllFromRemote(
   let sftp: any = null
   try {
     sftp = await getClient(config)
-    const baseRemote = config.remotePath || '/notemaster-data'
+    const baseRemote = config.remotePath || '/amnote-data'
 
     if (!existsSync(localFilesDir)) mkdirSync(localFilesDir, { recursive: true })
     const localDbDir = dirname(localDbPath)
@@ -128,7 +139,7 @@ export async function downloadAllFromRemote(
 
     let dbOk = false
     try {
-      const remoteDb = baseRemote + '/notemaster.db'
+      const remoteDb = baseRemote + '/amnote.db'
       await sftp.stat(remoteDb)
       await sftp.get(remoteDb, localDbPath)
       dbOk = true

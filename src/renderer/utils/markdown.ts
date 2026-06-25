@@ -19,7 +19,7 @@ const md = new MarkdownIt({
   }
 })
 
-// 自定义图片渲染规则，将 notemaster-data/files/ 路径转换为 notemaster:// 协议
+// 自定义图片渲染规则，将 amnote-data/files/ 路径转换为 amnote:// 协议
 const defaultImageRender = md.renderer.rules.image || function(tokens, idx, options, env, self) {
   return self.renderToken(tokens, idx, options)
 }
@@ -30,10 +30,10 @@ md.renderer.rules.image = function(tokens, idx, options, env, self) {
   
   if (srcIndex >= 0) {
     let src = token.attrs![srcIndex][1]
-    // 将 notemaster-data/files/xxx 转换为 notemaster://files/xxx
-    if (src.startsWith('notemaster-data/files/')) {
-      const relativePath = src.replace('notemaster-data/files/', '')
-      token.attrs![srcIndex][1] = `notemaster://files/${relativePath}`
+    // 将 amnote-data/files/xxx 转换为 amnote://files/xxx
+    if (src.startsWith('amnote-data/files/')) {
+      const relativePath = src.replace('amnote-data/files/', '')
+      token.attrs![srcIndex][1] = `amnote://files/${relativePath}`
     }
   }
   

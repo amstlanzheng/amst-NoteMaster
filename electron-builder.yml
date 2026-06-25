@@ -1,5 +1,5 @@
-appId: com.notemaster.app
-productName: NoteMaster
+appId: com.amnote.app
+productName: AmNote
 directories:
   output: ${env.BUILD_OUTPUT}
 electronDist: node_modules/electron/dist

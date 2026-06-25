@@ -109,6 +109,61 @@ function createTrayIcon(): NativeImage {
   return img
 }
 
+function createAppMenu() {
+  const template: Electron.MenuItemConstructorOptions[] = [
+    {
+      label: '文件',
+      submenu: [
+        { label: '打开文件', accelerator: 'CmdOrCtrl+O', click: () => getMainWindow()?.webContents.send('menu-open-file') },
+        { label: '打开文件夹', accelerator: 'CmdOrCtrl+Shift+O', click: () => getMainWindow()?.webContents.send('menu-open-folder') },
+        { type: 'separator' },
+        { label: '退出', accelerator: 'CmdOrCtrl+Q', click: () => app.quit() }
+      ]
+    },
+    {
+      label: '编辑',
+      submenu: [
+        { role: 'undo', label: '撤销' },
+        { role: 'redo', label: '重做' },
+        { type: 'separator' },
+        { role: 'cut', label: '剪切' },
+        { role: 'copy', label: '复制' },
+        { role: 'paste', label: '粘贴' },
+        { role: 'selectAll', label: '全选' }
+      ]
+    },
+    {
+      label: '视图',
+      submenu: [
+        { label: '搜索', accelerator: 'CmdOrCtrl+Shift+F', click: () => getMainWindow()?.webContents.send('global-search') },
+        { label: '数据统计', click: () => getMainWindow()?.webContents.send('menu-view-stats') },
+        { type: 'separator' },
+        { role: 'reload', label: '重新加载' },
+        { role: 'forceReload', label: '强制重新加载' },
+        { role: 'toggleDevTools', label: '切换开发者工具' },
+        { type: 'separator' },
+        { role: 'resetZoom', label: '实际大小' },
+        { role: 'zoomIn', label: '放大' },
+        { role: 'zoomOut', label: '缩小' },
+        { type: 'separator' },
+        { role: 'togglefullscreen', label: '切换全屏' }
+      ]
+    },
+    {
+      label: '帮助',
+      submenu: [
+        {
+          label: '关于 AmNote',
+          click: () => getMainWindow()?.webContents.send('show-about')
+        }
+      ]
+    }
+  ]
+
+  const menu = Menu.buildFromTemplate(template)
+  Menu.setApplicationMenu(menu)
+}
+
 function createTray() {
   try {
     const trayIcon = createTrayIcon()
@@ -119,7 +174,7 @@ function createTray() {
     
     tray = new Tray(trayIcon)
     console.log('[Tray] Tray created successfully')
-    tray.setToolTip('NoteMaster - AI驱动的个人知识管理平台')
+    tray.setToolTip('AmNote - AI驱动的个人知识管理平台')
 
   // 双击托盘图标显示窗口
   tray.on('double-click', () => {
@@ -157,7 +212,7 @@ function createTray() {
     },
     { type: 'separator' },
     {
-      label: '关于 NoteMaster',
+      label: '关于 AmNote',
       click: () => {
         const win = getMainWindow()
         if (win) {
@@ -185,6 +240,7 @@ function createTray() {
 app.whenReady().then(async () => {
   await initDatabase()
   registerIpcHandlers()
+  createAppMenu()
   
   // 设置默认的关闭行为（从 localStorage 读取会在渲染进程中处理）
   // 这里设置一个安全的默认值

@@ -8,8 +8,8 @@ let SQL: SqlJsStatic | null = null
 
 function resolveDbPath(): string {
   const candidates = [
-    join(app.getPath('userData'), 'notemaster.db'),
-    join(dirname(process.execPath), 'notemaster-data', 'notemaster.db')
+    join(app.getPath('userData'), 'amnote.db'),
+    join(dirname(process.execPath), 'amnote-data', 'amnote.db')
   ]
   for (const p of candidates) {
     try {
@@ -18,7 +18,7 @@ function resolveDbPath(): string {
       return p
     } catch { continue }
   }
-  return join(app.getPath('userData'), 'notemaster.db')
+  return join(app.getPath('userData'), 'amnote.db')
 }
 
 const DB_PATH = resolveDbPath()
@@ -100,6 +100,13 @@ function initTables() {
   `)
 
   db.run(`
+    CREATE TABLE IF NOT EXISTS settings (
+      key VARCHAR(100) PRIMARY KEY,
+      value TEXT
+    )
+  `)
+
+  db.run(`
     CREATE TABLE IF NOT EXISTS note_tags (
       note_id INTEGER NOT NULL,
       tag_id INTEGER NOT NULL,
@@ -124,6 +131,20 @@ function initTables() {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       keyword VARCHAR(255) NOT NULL,
       searched_at TEXT DEFAULT (datetime('now','localtime'))
+    )
+  `)
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS external_files (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      original_path TEXT NOT NULL,
+      filename TEXT NOT NULL,
+      size INTEGER,
+      imported_at TEXT DEFAULT (datetime('now','localtime')),
+      category_id INTEGER,
+      note_id INTEGER,
+      FOREIGN KEY (category_id) REFERENCES categories(id),
+      FOREIGN KEY (note_id) REFERENCES notes(id)
     )
   `)
 
@@ -153,7 +174,7 @@ function initTables() {
     const cnt = noteResult[0].values[0][0] as number
     if (cnt === 0) {
       db.run(`INSERT INTO notes (title, content, category_id, is_pinned) VALUES (?, ?, ?, ?)`,
-        ['欢迎使用 NoteMaster', '# 欢迎使用 NoteMaster\n\n这是一款**AI驱动**的个人知识管理平台。\n\n## 功能特点\n\n- 笔记管理\n- Markdown编辑\n- 分类管理\n- 标签系统\n- 全文搜索\n\n> 开始你的知识管理之旅吧！', 1, 1])
+        ['欢迎使用 AmNote', '# 欢迎使用 AmNote\n\n这是一款**AI驱动**的个人知识管理平台。\n\n## 功能特点\n\n- 笔记管理\n- Markdown编辑\n- 分类管理\n- 标签系统\n- 全文搜索\n\n> 开始你的知识管理之旅吧！', 1, 1])
       db.run(`INSERT INTO notes (title, content, category_id, is_favorite) VALUES (?, ?, ?, ?)`,
         ['Vue3 学习笔记', '## Vue3 Composition API\n\n```js\nimport { ref, computed } from \'vue\'\n\nconst count = ref(0)\nconst doubled = computed(() => count.value * 2)\n```\n\n使用 `<script setup>` 语法糖。', 2, 1])
       db.run(`INSERT INTO notes (title, content, category_id) VALUES (?, ?, ?)`,

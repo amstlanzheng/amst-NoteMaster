@@ -5,7 +5,7 @@ import { useUiStore } from '../stores/ui'
 import { useNoteStore } from '../stores/note'
 import { useCategoryStore } from '../stores/category'
 import { useTagStore } from '../stores/tag'
-import type { SftpConfig } from '@shared/types'
+import type { SftpConfig, ImageStorageMode } from '@shared/types'
 
 const uiStore = useUiStore()
 const noteStore = useNoteStore()
@@ -17,8 +17,14 @@ const importResult = ref('')
 const dbPath = ref('')
 const cleaningFiles = ref(false)
 const cleanResult = ref('')
+const imageStorageMode = ref<ImageStorageMode>('folder') // 默认为文件夹模式
 
-const syncConfig = ref<SftpConfig>({ host: '', port: 22, username: '', password: '', remotePath: '/notemaster-data' })
+// 导出/上传进度
+const showProgress = ref(false)
+const progressData = ref({ current: 0, total: 0, status: '' })
+let progressCleanup: (() => void) | null = null
+
+const syncConfig = ref<SftpConfig>({ host: '', port: 22, username: '', password: '', remotePath: '/amnote-data' })
 const syncAuthMode = ref<'password' | 'key'>('password')
 const syncKeyContent = ref('')
 const syncStatus = ref<'idle' | 'testing' | 'syncing' | 'connected' | 'error'>('idle')
@@ -29,7 +35,7 @@ const isPasswordSaved = ref(false)
 
 function loadSshConfig() {
   try {
-    const saved = localStorage.getItem('notemaster-ssh-config')
+    const saved = localStorage.getItem('amnote-ssh-config')
     if (saved) {
       const cfg = JSON.parse(saved)
       if (cfg.host) syncConfig.value.host = cfg.host
@@ -69,19 +75,19 @@ function saveSshConfig(saveCredentials = false) {
       }
       isPasswordSaved.value = true
     }
-    localStorage.setItem('notemaster-ssh-config', JSON.stringify(configToSave))
+    localStorage.setItem('amnote-ssh-config', JSON.stringify(configToSave))
   } catch {}
 }
 
 function clearSavedCredentials() {
   try {
-    const saved = localStorage.getItem('notemaster-ssh-config')
+    const saved = localStorage.getItem('amnote-ssh-config')
     if (saved) {
       const cfg = JSON.parse(saved)
       // 保留非敏感信息，删除密码和密钥
       delete cfg.password
       delete cfg.privateKey
-      localStorage.setItem('notemaster-ssh-config', JSON.stringify(cfg))
+      localStorage.setItem('amnote-ssh-config', JSON.stringify(cfg))
     }
     // 清空当前表单中的敏感信息
     syncConfig.value.password = ''
@@ -93,7 +99,7 @@ function clearSavedCredentials() {
 
 function loadCloseBehavior() {
   try {
-    const saved = localStorage.getItem('notemaster-close-behavior')
+    const saved = localStorage.getItem('amnote-close-behavior')
     if (saved === 'minimize' || saved === 'quit') {
       closeBehavior.value = saved
       // 通知主进程当前的关闭行为设置
@@ -103,7 +109,7 @@ function loadCloseBehavior() {
 }
 
 function saveCloseBehavior() {
-  try { localStorage.setItem('notemaster-close-behavior', closeBehavior.value) } catch {}
+  try { localStorage.setItem('amnote-close-behavior', closeBehavior.value) } catch {}
   window.api.setCloseBehavior?.(closeBehavior.value)
 }
 
@@ -116,17 +122,103 @@ function downloadBlob(blob: Blob, filename: string) {
 
 async function exportAllData() {
   try {
+    // 显示进度对话框
+    showProgress.value = true
+    progressData.value = { current: 0, total: 100, status: '正在准备导出...' }
+    
+    const handleProgress = (data: { current: number; total: number; status: string }) => {
+      console.log('[Export] Progress:', data)
+      progressData.value = data
+      if (data.current === data.total) {
+        setTimeout(() => {
+          showProgress.value = false
+          if (progressCleanup) progressCleanup()
+        }, 500)
+      }
+    }
+    
+    progressCleanup = window.api.onExportProgress(handleProgress)
+    
     const data = await window.api.exportAllData()
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
-    downloadBlob(blob, `notemaster-full-backup-${timestamp}.json`)
-    ElMessage.success('完整数据已导出')
+    
+    // 如果有图片,导出为 ZIP
+    if (data.images && data.images.length > 0) {
+      await exportAllDataAsZip(data)
+    } else {
+      // 没有图片,直接下载 JSON 文件
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+      downloadBlob(blob, `amnote-full-backup-${timestamp}.json`)
+      ElMessage.success('完整数据已导出')
+      showProgress.value = false
+      if (progressCleanup) progressCleanup()
+    }
   } catch {
     const data = buildExportFromMemory()
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
-    downloadBlob(blob, `notemaster-full-backup-${timestamp}.json`)
+    downloadBlob(blob, `amnote-full-backup-${timestamp}.json`)
     ElMessage.success('完整数据已导出（浏览器模式）')
+    showProgress.value = false
+    if (progressCleanup) progressCleanup()
+  }
+}
+
+async function exportAllDataAsZip(data: any) {
+  try {
+    let JSZip: any
+    
+    try {
+      const jszipModule = await import('jszip')
+      JSZip = jszipModule.default || jszipModule
+    } catch {
+      if (!(window as any).JSZip) {
+        await new Promise((resolve, reject) => {
+          const script = document.createElement('script')
+          script.src = 'https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js'
+          script.onload = () => resolve(true)
+          script.onerror = reject
+          document.head.appendChild(script)
+        })
+      }
+      JSZip = (window as any).JSZip
+    }
+    
+    if (!JSZip) throw new Error('JSZip 加载失败')
+    
+    const zip = new JSZip()
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+    
+    // 添加 JSON 备份文件到根目录
+    zip.file(`amnote-backup-${timestamp}.json`, JSON.stringify(data, null, 2))
+    
+    // 添加图片文件夹和图片
+    if (data.images && data.images.length > 0) {
+      const imagesFolder = zip.folder('images')
+      if (!imagesFolder) throw new Error('创建图片文件夹失败')
+      
+      for (const image of data.images) {
+        const binaryString = atob(image.base64)
+        const bytes = new Uint8Array(binaryString.length)
+        for (let j = 0; j < binaryString.length; j++) {
+          bytes[j] = binaryString.charCodeAt(j)
+        }
+        imagesFolder.file(image.filename, bytes)
+      }
+    }
+    
+    const blob = await zip.generateAsync({ type: 'blob' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `amnote-full-backup-${timestamp}.zip`
+    a.click()
+    URL.revokeObjectURL(url)
+    
+    ElMessage.success(`完整数据已导出（包含 ${data.images.length} 张图片）`)
+  } catch (error) {
+    console.error('Export failed:', error)
+    ElMessage.error('导出失败：' + (error as Error).message)
   }
 }
 
@@ -140,17 +232,104 @@ function buildExportFromMemory() {
 }
 
 async function exportMarkdownZip() {
-  let md = ''
-  for (const note of noteStore.notes) {
-    if (note.is_deleted) continue
-    md += `---\ntitle: "${note.title}"\ndate: ${note.updated_at}\ncategory: ${note.category?.name || '未分类'}\n`
-    if (note.tags?.length) md += `tags: [${note.tags.map(t => t.name).join(', ')}]\n`
-    md += `---\n\n${note.content}\n\n`
+  try {
+    let JSZip: any
+    
+    try {
+      const jszipModule = await import('jszip')
+      JSZip = jszipModule.default || jszipModule
+    } catch {
+      if (!(window as any).JSZip) {
+        await new Promise((resolve, reject) => {
+          const script = document.createElement('script')
+          script.src = 'https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js'
+          script.onload = () => resolve(true)
+          script.onerror = reject
+          document.head.appendChild(script)
+        })
+      }
+      JSZip = (window as any).JSZip
+    }
+    
+    if (!JSZip) throw new Error('JSZip 加载失败')
+    
+    const zip = new JSZip()
+    // 不创建根文件夹,直接将MD和图片放在ZIP根目录
+    
+    // 收集所有图片
+    const allImages = new Map<string, { base64: string; filename: string }>()
+    
+    // 处理每篇笔记
+    for (const note of noteStore.notes) {
+      if (note.is_deleted) continue
+      
+      let content = note.content || ''
+      
+      // 提取并转换 Base64 图片
+      const base64Regex = /!\[\]\(data:image\/(\w+);base64,([A-Za-z0-9+/=]+)\)/g
+      let b64m
+      let b64Index = 0
+      const noteBase64Images: Array<{ old: string; filename: string; base64: string }> = []
+      
+      while ((b64m = base64Regex.exec(content)) !== null) {
+        const format = b64m[1].toLowerCase()
+        const base64Data = b64m[2]
+        const filename = `embedded_${note.id}_${b64Index++}.${format}`
+        noteBase64Images.push({ 
+          old: b64m[0], 
+          filename, 
+          base64: base64Data 
+        })
+        allImages.set(filename, { base64: base64Data, filename })
+      }
+      
+      // 替换 Base64 图片为相对路径
+      let replaceIndex = 0
+      content = content.replace(/!\[\]\(data:image\/(\w+);base64,[A-Za-z0-9+/=]+\)/g, () => {
+        const img = noteBase64Images[replaceIndex++]
+        return img ? `![](images/${img.filename})` : ''
+      })
+      
+      // 替换文件夹模式图片路径
+      content = content.replace(/amnote-data\/files\/([^\s\)"']+)/g, 'images/$1')
+      
+      // 构建 Markdown 内容
+      let md = `---\ntitle: "${note.title}"\ndate: ${note.updated_at}\ncategory: ${note.category?.name || '未分类'}\n`
+      if (note.tags?.length) md += `tags: [${note.tags.map(t => t.name).join(', ')}]\n`
+      md += `---\n\n${content}\n\n`
+      
+      // 添加到 ZIP 根目录
+      zip.file(`${note.title.replace(/[\\/:*?"<>|]/g, '_')}.md`, md)
+    }
+    
+    // 添加所有图片到 images 文件夹(在ZIP根目录)
+    if (allImages.size > 0) {
+      const imagesFolder = zip.folder('images')
+      if (!imagesFolder) throw new Error('创建图片文件夹失败')
+      
+      for (const [filename, img] of allImages) {
+        const binaryString = atob(img.base64)
+        const bytes = new Uint8Array(binaryString.length)
+        for (let j = 0; j < binaryString.length; j++) {
+          bytes[j] = binaryString.charCodeAt(j)
+        }
+        imagesFolder.file(filename, bytes)
+      }
+    }
+    
+    const blob = await zip.generateAsync({ type: 'blob' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `amnote-notes.zip`
+    a.click()
+    URL.revokeObjectURL(url)
+    
+    ElMessage.success(`Markdown 已导出（包含 ${allImages.size} 张图片）`)
+  } catch (error) {
+    console.error('Export failed:', error)
+    ElMessage.error('导出失败：' + (error as Error).message)
   }
-  const blob = new Blob([md], { type: 'text/markdown' })
-  const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
-  downloadBlob(blob, `notemaster-notes-${timestamp}.md`)
-  ElMessage.success('Markdown 已导出')
 }
 
 function triggerImportFile() {
@@ -204,42 +383,98 @@ async function clearAllData() {
 
 async function cleanUnusedFiles() {
   try {
-    const result = await ElMessageBox.confirm(
-      '此操作将扫描并删除所有未被笔记引用的图片/附件文件。操作不可撤销，建议先备份重要数据。',
-      '清除未引用文件',
-      { 
-        confirmButtonText: '确认清除', 
-        cancelButtonText: '取消', 
-        type: 'warning',
-        confirmButtonClass: 'el-button--danger'
-      }
-    )
+    // 第一步：预览将被删除的文件
+    cleaningFiles.value = true
+    cleanResult.value = ''
     
-    if (result === 'confirm') {
-      cleaningFiles.value = true
-      cleanResult.value = ''
+    try {
+      const preview = await window.api.previewUnusedFiles()
       
-      try {
-        const res = await window.api.cleanUnusedFiles()
-        const sizeMB = (res.totalSize / (1024 * 1024)).toFixed(2)
-        
-        if (res.deletedCount > 0) {
-          cleanResult.value = `成功清理 ${res.deletedCount} 个文件，释放 ${sizeMB} MB 空间`
-          ElMessage.success(cleanResult.value)
-        } else {
-          cleanResult.value = '没有发现未引用的文件'
-          ElMessage.info(cleanResult.value)
-        }
-      } catch (e: any) {
-        cleanResult.value = '清理失败: ' + (e.message || '未知错误')
-        ElMessage.error(cleanResult.value)
-      } finally {
+      if (preview.totalCount === 0) {
+        ElMessage.info('没有发现未引用的文件')
         cleaningFiles.value = false
+        return
       }
+      
+      // 显示预览对话框
+      const fileList = preview.unusedFiles.map((f: any, i: number) => 
+        `${i + 1}. ${f.filename} (${f.sizeFormatted})`
+      ).join('\n')
+      
+      const confirmResult = await ElMessageBox.confirm(
+        `发现 ${preview.totalCount} 个未引用的文件，共占用 ${preview.totalSizeFormatted} 空间\n\n` +
+        `将被删除的文件列表：\n${fileList}\n\n` +
+        `此操作不可撤销，确定要删除吗？`,
+        '清除未引用文件',
+        { 
+          confirmButtonText: '确认删除', 
+          cancelButtonText: '取消', 
+          type: 'warning',
+          confirmButtonClass: 'el-button--danger',
+          dangerouslyUseHTMLString: false
+        }
+      )
+      
+      if (confirmResult !== 'confirm') {
+        cleaningFiles.value = false
+        return
+      }
+      
+      // 第二步：执行清理
+      const res = await window.api.cleanUnusedFiles()
+      
+      // 显示详细日志
+      let logHtml = '<div style="max-height: 300px; overflow-y: auto; font-family: monospace; font-size: 12px; line-height: 1.6;">'
+      res.log.forEach((line: string) => {
+        if (line.includes('已删除')) {
+          logHtml += `<div style="color: #67C23A;">✓ ${escapeHtml(line)}</div>`
+        } else if (line.includes('失败')) {
+          logHtml += `<div style="color: #F56C6C;">✗ ${escapeHtml(line)}</div>`
+        } else if (line.includes('开始') || line.includes('完成')) {
+          logHtml += `<div style="font-weight: bold; color: #409EFF;">${escapeHtml(line)}</div>`
+        } else {
+          logHtml += `<div>${escapeHtml(line)}</div>`
+        }
+      })
+      logHtml += '</div>'
+      
+      const sizeMB = (res.totalSize / (1024 * 1024)).toFixed(2)
+      
+      if (res.deletedCount > 0) {
+        cleanResult.value = `成功清理 ${res.deletedCount} 个文件，释放 ${sizeMB} MB 空间（耗时 ${res.duration} 秒）`
+        
+        await ElMessageBox.alert(
+          logHtml,
+          '清理结果详情',
+          {
+            confirmButtonText: '确定',
+            type: 'success',
+            dangerouslyUseHTMLString: true
+          }
+        )
+        
+        ElMessage.success(cleanResult.value)
+      } else {
+        cleanResult.value = '没有发现未引用的文件'
+        ElMessage.info(cleanResult.value)
+      }
+    } catch (e: any) {
+      cleanResult.value = '清理失败: ' + (e.message || '未知错误')
+      ElMessage.error(cleanResult.value)
+    } finally {
+      cleaningFiles.value = false
     }
   } catch {
     // 用户取消
+    cleaningFiles.value = false
   }
+}
+
+// HTML转义函数
+function escapeHtml(text: string): string {
+  const div = document.createElement('div')
+  div.textContent = text
+  return div.innerHTML
 }
 
 async function testSyncConnection() {
@@ -310,6 +545,24 @@ async function uploadToCloud() {
   saveSshConfig()
   const cfg: SftpConfig = { ...syncConfig.value, port: Number(syncConfig.value.port) || 22 }
   if (syncAuthMode.value === 'key') { cfg.password = undefined; cfg.privateKey = syncKeyContent.value }
+  
+  // 显示进度对话框
+  showProgress.value = true
+  progressData.value = { current: 0, total: 100, status: '正在准备上传...' }
+  
+  const handleProgress = (data: { current: number; total: number; status: string }) => {
+    console.log('[Upload] Progress:', data)
+    progressData.value = data
+    if (data.current === data.total) {
+      setTimeout(() => {
+        showProgress.value = false
+        if (progressCleanup) progressCleanup()
+      }, 500)
+    }
+  }
+  
+  progressCleanup = window.api.onExportProgress(handleProgress)
+  
   syncStatus.value = 'syncing'; syncMessage.value = ''
   try {
     const r = await window.api.uploadToCloud(cfg)
@@ -318,6 +571,8 @@ async function uploadToCloud() {
     syncLastSync.value = new Date().toLocaleString()
   } catch {
     syncStatus.value = 'error'; syncMessage.value = 'mock: 上传失败'
+  } finally {
+    if (progressCleanup) progressCleanup()
   }
 }
 
@@ -361,8 +616,25 @@ async function downloadFromCloud() {
 onMounted(() => {
   loadSshConfig()
   loadCloseBehavior()
+  loadImageStorageMode()
   loadDbPath()
 })
+
+function loadImageStorageMode() {
+  try {
+    const saved = localStorage.getItem('amnote-image-storage-mode')
+    if (saved === 'base64' || saved === 'folder') {
+      imageStorageMode.value = saved
+    }
+  } catch {}
+}
+
+function saveImageStorageMode(mode: ImageStorageMode) {
+  try {
+    localStorage.setItem('amnote-image-storage-mode', mode)
+    ElMessage.success(`图片存储模式已切换为：${mode === 'base64' ? 'Base64 嵌入' : '文件夹存储'}`)
+  } catch {}
+}
 
 async function loadDbPath() {
   try {
@@ -388,6 +660,7 @@ function copyDbPath() {
     <el-card class="setting-card">
       <template #header><span>外观</span></template>
       <div class="setting-row"><span>深色模式</span><el-switch v-model="uiStore.isDarkMode" @change="uiStore.toggleDarkMode" /></div>
+      <div class="setting-row"><span>显示文件夹内文件数量</span><el-switch v-model="uiStore.showFolderCount" /></div>
     </el-card>
 
     <el-card class="setting-card">
@@ -396,6 +669,43 @@ function copyDbPath() {
         <el-radio value="quit">直接退出</el-radio>
         <el-radio value="minimize">最小化到托盘</el-radio>
       </el-radio-group>
+    </el-card>
+
+    <el-card class="setting-card">
+      <template #header><span>图片存储方式</span></template>
+      <p class="desc">选择粘贴图片时的存储方式：</p>
+      <div class="setting-row">
+        <el-radio-group v-model="imageStorageMode" @change="saveImageStorageMode">
+          <el-radio value="base64">
+            <div style="display: flex; flex-direction: column; gap: 4px;">
+              <span style="font-weight: 500;">Base64 嵌入</span>
+              <span style="font-size: 12px; color: var(--text-tertiary);">图片转换为 Base64 直接嵌入 Markdown，方便单文件分享</span>
+            </div>
+          </el-radio>
+          <el-radio value="folder">
+            <div style="display: flex; flex-direction: column; gap: 4px;">
+              <span style="font-weight: 500;">文件夹存储（推荐）</span>
+              <span style="font-size: 12px; color: var(--text-tertiary);">图片保存到独立文件夹，Markdown 中引用路径，适合大量图片</span>
+            </div>
+          </el-radio>
+        </el-radio-group>
+      </div>
+      <el-alert
+        title="温馨提示"
+        type="warning"
+        :closable="false"
+        style="margin-top: 12px;"
+      >
+        <div style="font-size: 13px; line-height: 1.6;">
+          <p style="margin: 0 0 8px 0;"><strong>文件夹模式注意事项：</strong></p>
+          <ul style="margin: 0; padding-left: 20px;">
+            <li>备份和导出数据时，需要同时备份图片文件夹（amnote-data/files/）</li>
+            <li>导出为 ZIP 或文件夹格式时，图片会自动包含在内</li>
+            <li>导出为 JSON 备份时，仅包含数据库内容，不包含图片文件</li>
+            <li>建议在重要操作前手动备份整个 amnote-data 目录</li>
+          </ul>
+        </div>
+      </el-alert>
     </el-card>
 
     <el-card class="setting-card">
@@ -456,7 +766,7 @@ function copyDbPath() {
           <el-col :span="8"><el-form-item label="端口"><el-input v-model.number="syncConfig.port" placeholder="22" /></el-form-item></el-col>
         </el-row>
         <el-form-item label="用户名"><el-input v-model="syncConfig.username" placeholder="root" /></el-form-item>
-        <el-form-item label="远程路径"><el-input v-model="syncConfig.remotePath" placeholder="/notemaster-data" /></el-form-item>
+        <el-form-item label="远程路径"><el-input v-model="syncConfig.remotePath" placeholder="/amnote-data" /></el-form-item>
         <el-form-item label="认证方式">
           <el-radio-group v-model="syncAuthMode">
             <el-radio value="password">密码</el-radio>
@@ -513,8 +823,29 @@ function copyDbPath() {
 
     <el-card class="setting-card">
       <template #header><span>关于</span></template>
-      <div class="about-info"><h3>NoteMaster v1.0.0</h3><p>AI驱动的个人知识管理平台</p><p>Electron + Vue3 + TypeScript</p></div>
+      <div class="about-info"><h3>AmNote v1.0.0</h3><p>AI驱动的个人知识管理平台</p><p>Electron + Vue3 + TypeScript</p></div>
     </el-card>
+
+    <!-- 进度条对话框 -->
+    <el-dialog
+      v-model="showProgress"
+      title="处理中..."
+      width="400px"
+      :close-on-click-modal="false"
+      :close-on-press-escape="false"
+      :show-close="false"
+    >
+      <div class="progress-content">
+        <el-progress
+          :percentage="Math.round((progressData.current / progressData.total) * 100)"
+          :status="progressData.current === progressData.total ? 'success' : undefined"
+        />
+        <div class="progress-status">{{ progressData.status }}</div>
+        <div class="progress-detail" v-if="progressData.total > 0">
+          {{ progressData.current }} / {{ progressData.total }}
+        </div>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
@@ -594,4 +925,22 @@ function copyDbPath() {
 .about-info p { color: var(--text-secondary); font-size: 13px; }
 .danger-title { color: #f56c6c; }
 .danger-card { border-color: rgba(245, 108, 108, 0.3); }
+
+/* 进度条样式 */
+.progress-content {
+  padding: 20px 0;
+}
+.progress-status {
+  margin-top: 16px;
+  text-align: center;
+  font-size: 14px;
+  color: var(--text-primary);
+  font-weight: 500;
+}
+.progress-detail {
+  margin-top: 8px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
 </style>

@@ -4,32 +4,64 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { useNoteStore } from '../../stores/note'
 import { useCategoryStore } from '../../stores/category'
 import { useTagStore } from '../../stores/tag'
+import { useUiStore } from '../../stores/ui'
 import { formatRelative, stripMarkdown, truncate } from '../../utils/format'
-import type { Note } from '@shared/types'
+import type { Note, Category } from '@shared/types'
 
 const noteStore = useNoteStore()
 const categoryStore = useCategoryStore()
 const tagStore = useTagStore()
+const uiStore = useUiStore()
 
 const noteContextMenu = ref({ visible: false, x: 0, y: 0, note: null as Note | null })
 const batchMode = ref(false)
 const selectedIds = ref<Set<number>>(new Set())
 
-const currentCategoryName = computed(() => {
+// 当前选中分类的直接子分类（用于在列表中显示为文件夹）
+const childCategories = computed(() => {
   if (categoryStore.selectedCategoryId === null || categoryStore.selectedCategoryId === undefined) {
-    return '全部笔记'
+    // 未分类/全部笔记：不显示子分类文件夹
+    return []
   }
-  const findName = (cats: any[]): string | null => {
+  // 找到当前选中的分类
+  const findCat = (cats: Category[]): Category | null => {
     for (const c of cats) {
-      if (c.id === categoryStore.selectedCategoryId) return c.name
+      if (c.id === categoryStore.selectedCategoryId) return c
       if (c.children) {
-        const found = findName(c.children)
+        const found = findCat(c.children)
         if (found) return found
       }
     }
     return null
   }
-  return findName(categoryStore.categories) || '未分类'
+  const current = findCat(categoryStore.categories)
+  return current?.children || []
+})
+
+// 在分类树中查找分类（含层级）
+function findCategoryInTree(cats: Category[], id: number): Category | null {
+  for (const c of cats) {
+    if (c.id === id) return c
+    if (c.children) {
+      const found = findCategoryInTree(c.children, id)
+      if (found) return found
+    }
+  }
+  return null
+}
+
+// 点击子分类文件夹
+function enterSubCategory(catId: number) {
+  categoryStore.selectCategory(catId)
+  noteStore.setFilters({ category_id: catId })
+}
+
+const currentCategoryName = computed(() => {
+  if (categoryStore.selectedCategoryId === null || categoryStore.selectedCategoryId === undefined) {
+    return '全部笔记'
+  }
+  const cat = findCategoryInTree(categoryStore.categories, categoryStore.selectedCategoryId)
+  return cat?.name || '未分类'
 })
 
 // 组合显示当前筛选条件（分类 + 标签）
@@ -141,11 +173,75 @@ async function menuExportMd() {
   closeNoteMenu()
   try {
     const result = await window.api.exportNoteMd(note.id)
-    if (result) downloadText(result.content, `${result.title}.md`, 'text/markdown')
+    if (result) {
+      // 如果有图片，导出为 ZIP
+      if (result.images && result.images.length > 0) {
+        await exportSingleNoteAsZip(result.title, result.content, result.images)
+      } else {
+        // 没有图片，直接下载 MD 文件
+        downloadText(result.content, `${result.title}.md`, 'text/markdown')
+      }
+    }
   } catch {
     downloadText(`---\ntitle: "${note.title}"\ndate: ${note.updated_at}\n---\n\n${note.content}`, `${note.title}.md`, 'text/markdown')
   }
   ElMessage.success('Markdown 已导出')
+}
+
+async function exportSingleNoteAsZip(title: string, content: string, images: Array<{ filename: string; base64: string }>) {
+  try {
+    let JSZip: any
+    
+    try {
+      const jszipModule = await import('jszip')
+      JSZip = jszipModule.default || jszipModule
+    } catch {
+      if (!(window as any).JSZip) {
+        await new Promise((resolve, reject) => {
+          const script = document.createElement('script')
+          script.src = 'https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js'
+          script.onload = () => resolve(true)
+          script.onerror = reject
+          document.head.appendChild(script)
+        })
+      }
+      JSZip = (window as any).JSZip
+    }
+    
+    if (!JSZip) throw new Error('JSZip 加载失败')
+    
+    const zip = new JSZip()
+    // 不创建根文件夹,直接将MD和图片放在ZIP根目录
+    
+    // 添加 Markdown 文件到根目录
+    zip.file(`${title}.md`, content)
+    
+    // 添加图片文件夹和图片到根目录
+    if (images.length > 0) {
+      const imagesFolder = zip.folder('images')
+      if (!imagesFolder) throw new Error('创建图片文件夹失败')
+      
+      for (const image of images) {
+        const binaryString = atob(image.base64)
+        const bytes = new Uint8Array(binaryString.length)
+        for (let j = 0; j < binaryString.length; j++) {
+          bytes[j] = binaryString.charCodeAt(j)
+        }
+        imagesFolder.file(image.filename, bytes)
+      }
+    }
+    
+    const blob = await zip.generateAsync({ type: 'blob' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${title}.zip`
+    a.click()
+    URL.revokeObjectURL(url)
+  } catch (error) {
+    console.error('Export as ZIP failed:', error)
+    ElMessage.error('导出 ZIP 失败')
+  }
 }
 
 async function menuExportHtml() {
@@ -154,7 +250,15 @@ async function menuExportHtml() {
   closeNoteMenu()
   try {
     const result = await window.api.exportNoteHtml(note.id)
-    if (result) downloadText(result.content, `${result.title}.html`, 'text/html')
+    if (result) {
+      // 如果有图片，导出为 ZIP
+      if (result.images && result.images.length > 0) {
+        await exportSingleNoteAsZip(result.title, result.content, result.images)
+      } else {
+        // 没有图片，直接下载 HTML 文件
+        downloadText(result.content, `${result.title}.html`, 'text/html')
+      }
+    }
   } catch {
     const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${note.title}</title><style>body{max-width:800px;margin:0 auto;padding:40px 20px;font-family:sans-serif;font-size:16px;line-height:1.8}</style></head><body><pre>${note.content}</pre></body></html>`
     downloadText(html, `${note.title}.html`, 'text/html')
@@ -255,14 +359,35 @@ async function batchDelete() {
           <el-icon class="is-loading"><Loading /></el-icon>
         </div>
       </template>
-      <template v-else-if="listState === 'empty'">
-        <div class="empty-state">
-          <el-icon :size="40"><Document /></el-icon>
-          <p>暂无笔记</p>
-          <el-button type="primary" size="small" @click="handleNewNote">创建第一篇笔记</el-button>
-        </div>
-      </template>
       <template v-else>
+        <!-- 子分类文件夹列表 -->
+        <div v-if="childCategories.length > 0" class="sub-folder-section">
+          <div
+            v-for="cat in childCategories"
+            :key="cat.id"
+            class="sub-folder-card"
+            @click="enterSubCategory(cat.id)"
+          >
+            <el-icon class="folder-icon"><Folder /></el-icon>
+            <span class="folder-name">{{ cat.name }}</span>
+            <span v-if="uiStore.showFolderCount" class="folder-count">{{ cat.note_count || 0 }}</span>
+          </div>
+        </div>
+
+        <!-- 笔记列表 -->
+        <template v-if="sortedNotes.length === 0 && childCategories.length > 0">
+          <div class="empty-state">
+            <p>当前分类暂无笔记</p>
+          </div>
+        </template>
+        <template v-else-if="sortedNotes.length === 0 && childCategories.length === 0">
+          <div class="empty-state">
+            <el-icon :size="40"><Document /></el-icon>
+            <p>暂无笔记</p>
+            <el-button type="primary" size="small" @click="handleNewNote">创建第一篇笔记</el-button>
+          </div>
+        </template>
+        <template v-else>
         <div v-for="note in sortedNotes" :key="note.id"
           class="note-card"
           :class="{ active: noteStore.currentNote?.id === note.id, pinned: note.is_pinned }"
@@ -296,6 +421,7 @@ async function batchDelete() {
             </div>
           </div>
         </div>
+        </template>
       </template>
     </el-scrollbar>
 
@@ -375,4 +501,56 @@ async function batchDelete() {
   color: var(--text-primary);
 }
 .loading-state, .empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 200px; color: var(--text-tertiary); gap: 12px; }
+
+/* 子文件夹区域 */
+.sub-folder-section {
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.sub-folder-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  margin-bottom: 4px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.sub-folder-card:hover {
+  background: var(--hover-bg);
+  color: var(--text-primary);
+}
+
+.sub-folder-card:last-child {
+  margin-bottom: 0;
+}
+
+.folder-icon {
+  font-size: 16px;
+  color: var(--accent-color);
+  flex-shrink: 0;
+}
+
+.folder-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-count {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  background: var(--hover-bg);
+  padding: 1px 6px;
+  border-radius: 10px;
+  min-width: 18px;
+  text-align: center;
+  flex-shrink: 0;
+}
 </style>

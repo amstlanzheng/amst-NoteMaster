@@ -6,13 +6,13 @@ let mainWindow: BrowserWindow | null = null
 
 export function createMainWindow(): BrowserWindow {
   // 注册自定义协议用于加载本地文件
-  if (!protocol.isProtocolRegistered('notemaster')) {
-    protocol.registerFileProtocol('notemaster', (request, callback) => {
+  if (!protocol.isProtocolRegistered('amnote')) {
+    protocol.registerFileProtocol('amnote', (request, callback) => {
       try {
-        const url = request.url.replace(/^notemaster:\/\//, '')
+        const url = request.url.replace(/^amnote:\/\//, '')
         const decodedUrl = decodeURIComponent(url)
-        // notemaster://files/xxx.png -> {userData}/notemaster-data/files/xxx.png
-        const filePath = join(app.getPath('userData'), 'notemaster-data', decodedUrl)
+        // amnote://files/xxx.png -> {userData}/amnote-data/files/xxx.png
+        const filePath = join(app.getPath('userData'), 'amnote-data', decodedUrl)
         console.log('[Protocol] Request:', request.url)
         console.log('[Protocol] Mapped to:', filePath)
         console.log('[Protocol] Exists:', existsSync(filePath))

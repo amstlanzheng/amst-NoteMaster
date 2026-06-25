@@ -9,6 +9,8 @@ const router = createRouter({
     { path: '/search', name: 'search', component: () => import('../views/SearchView.vue') },
     { path: '/trash', name: 'trash', component: () => import('../views/TrashView.vue') },
     { path: '/stats', name: 'stats', component: () => import('../views/StatsView.vue') },
+    { path: '/files', name: 'files', component: () => import('../views/FileSpaceView.vue') },
+    { path: '/external-preview', name: 'external-preview', component: () => import('../views/ExternalFilePreview.vue') },
     { path: '/settings', name: 'settings', component: () => import('../views/SettingsView.vue') }
   ]
 })

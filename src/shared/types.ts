@@ -21,6 +21,7 @@ export interface Category {
   is_favorite: boolean
   created_at: string
   children?: Category[]
+  note_count?: number // 直接笔记数量
 }
 
 export interface Tag {
@@ -98,4 +99,12 @@ export interface ContextMenuItem {
   action: () => void
   divider?: boolean
   danger?: boolean
+}
+
+// 图片存储模式
+export type ImageStorageMode = 'base64' | 'folder'
+
+// 应用设置
+export interface AppSettings {
+  imageStorageMode: ImageStorageMode
 }

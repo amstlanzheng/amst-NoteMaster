@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted } from 'vue'
 import AppSidebar from './AppSidebar.vue'
+import AppTopBar from './AppTopBar.vue'
 import { useNoteStore } from '../../stores/note'
 import { useCategoryStore } from '../../stores/category'
 import { useTagStore } from '../../stores/tag'
@@ -27,6 +28,7 @@ onMounted(async () => {
       <AppSidebar />
     </div>
     <div class="app-main">
+      <AppTopBar />
       <router-view />
     </div>
   </div>

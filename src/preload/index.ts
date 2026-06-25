@@ -55,7 +55,27 @@ const api = {
 
   saveLocalFile: (data: { buffer: number[]; filename: string; noteId: number }) => ipcRenderer.invoke('file:save-local-file', data),
   scanReferencedFiles: () => ipcRenderer.invoke('file:scan-referenced-files'),
+  previewUnusedFiles: () => ipcRenderer.invoke('file:preview-unused-files'),
+  getAllFiles: () => ipcRenderer.invoke('file:get-all-files'),
+  getFilePath: (filename: string) => ipcRenderer.invoke('file:get-file-path', filename),
+  readFileAsBase64: (filePath: string) => ipcRenderer.invoke('file:read-as-base64', filePath),
+  deleteFile: (filename: string) => ipcRenderer.invoke('file:delete', filename),
   cleanUnusedFiles: () => ipcRenderer.invoke('file:clean-unused-files'),
+
+  // 文件导入相关
+  importFile: (filePath: string, categoryId: number | null = null) => ipcRenderer.invoke('file:import-file', filePath, categoryId),
+  importFolder: (folderPath: string, categoryId: number | null = null) => ipcRenderer.invoke('file:import-folder', folderPath, categoryId),
+  resolveFileConflict: (data: { action: 'overwrite' | 'rename' | 'skip'; originalPath: string; filename: string; categoryId: number | null }) => ipcRenderer.invoke('file:resolve-conflict', data),
+  addExternalFiles: (filePaths: string[]) => ipcRenderer.invoke('file:add-external-files', filePaths),
+  addExternalFolder: (folderPath: string) => ipcRenderer.invoke('file:add-external-folder', folderPath),
+  getExternalFiles: () => ipcRenderer.invoke('file:get-external-files'),
+  setCurrentViewingPath: (path: string | null) => ipcRenderer.invoke('file:set-current-viewing-path', path),
+  getCurrentViewingPath: () => ipcRenderer.invoke('file:get-current-viewing-path'),
+  debugAllFiles: () => ipcRenderer.invoke('file:debug-all-files'),
+  scanExternalDirs: (parentPath?: string) => ipcRenderer.invoke('file:scan-external-dirs', parentPath),
+  deleteExternalFile: (id: number) => ipcRenderer.invoke('file:delete-external-file', id),
+  openExternalFile: (filePath: string) => ipcRenderer.invoke('file:open-external', filePath),
+  saveExternalFile: (filePath: string, base64Content: string) => ipcRenderer.invoke('file:save-external', filePath, base64Content),
 
   testSyncConnection: (config: SftpConfig) => ipcRenderer.invoke('sync:test-connection', config),
   uploadToCloud: (config: SftpConfig) => ipcRenderer.invoke('sync:upload', config),
@@ -73,9 +93,20 @@ const api = {
 
   quitApp: () => ipcRenderer.send('app:quit'),
 
+  openFileDialog: (options: Electron.OpenDialogOptions) => ipcRenderer.invoke('dialog:open-file-dialog', options),
+
   setCloseBehavior: (behavior: string) => ipcRenderer.send('app:set-close-behavior', behavior),
   
-  getDbPath: () => ipcRenderer.invoke('app:get-db-path')
+  getDbPath: () => ipcRenderer.invoke('app:get-db-path'),
+
+  // 菜单事件监听
+  onMenuEvent: (channel: string, callback: () => void) => {
+    ipcRenderer.on(channel, callback)
+    return () => ipcRenderer.removeListener(channel, callback)
+  },
+  removeMenuListeners: (channels: string[]) => {
+    channels.forEach(ch => ipcRenderer.removeAllListeners(ch))
+  }
 }
 
 contextBridge.exposeInMainWorld('api', api)

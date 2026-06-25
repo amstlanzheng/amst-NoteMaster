@@ -1,5 +1,5 @@
 {
-  "name": "notemaster",
+  "name": "amnote",
   "version": "1.0.0",
   "description": "AI驱动的个人知识管理平台 - Windows桌面笔记软件",
   "main": "out/main/index.js",

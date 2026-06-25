@@ -223,16 +223,39 @@ async function handlePasteImage(event: ClipboardEvent) {
         break
       }
       
-      // 将图片转换为 Base64
+      // 获取当前图片存储模式
+      const storageMode = localStorage.getItem('amnote-image-storage-mode') || 'base64'
+      
       try {
-        const base64 = await fileToBase64(blob)
-        const mdImg = `\n![](${base64})\n`
-        editContent.value += mdImg
-        triggerAutoSave()
-        ElMessage.success('图片已插入（Base64 格式）')
+        if (storageMode === 'folder') {
+          // 文件夹存储模式：保存图片到本地并返回路径
+          const arrayBuffer = await blob.arrayBuffer()
+          const buffer = Array.from(new Uint8Array(arrayBuffer))
+          const result = await window.api.saveLocalFile({
+            buffer,
+            filename: `pasted_${Date.now()}.${blob.type.split('/')[1] || 'png'}`,
+            noteId: noteStore.currentNote!.id
+          })
+          
+          if (result.error) {
+            throw new Error(result.error)
+          }
+          
+          const mdImg = `\n![](${result.path})\n`
+          editContent.value += mdImg
+          triggerAutoSave()
+          ElMessage.success('图片已插入（文件夹存储）')
+        } else {
+          // Base64 存储模式：直接嵌入
+          const base64 = await fileToBase64(blob)
+          const mdImg = `\n![](${base64})\n`
+          editContent.value += mdImg
+          triggerAutoSave()
+          ElMessage.success('图片已插入（Base64 格式）')
+        }
       } catch (error) {
-        console.error('Failed to convert image to Base64:', error)
-        ElMessage.error('图片转换失败')
+        console.error('Failed to insert image:', error)
+        ElMessage.error('图片插入失败')
       }
       break
     }
@@ -262,6 +285,26 @@ function showImageDetail(img: Base64Image) {
     dangerouslyUseHTMLString: true,
     confirmButtonText: '关闭'
   })
+}
+
+// 迅速滚动到顶部
+function scrollToTop() {
+  if (editPaneRef.value) {
+    editPaneRef.value.scrollTop = 0
+  }
+  if (previewPaneRef.value) {
+    previewPaneRef.value.scrollTop = 0
+  }
+}
+
+// 迅速滚动到底部
+function scrollToBottom() {
+  if (editPaneRef.value) {
+    editPaneRef.value.scrollTop = editPaneRef.value.scrollHeight
+  }
+  if (previewPaneRef.value) {
+    previewPaneRef.value.scrollTop = previewPaneRef.value.scrollHeight
+  }
 }
 
 // 删除图片
@@ -327,6 +370,12 @@ function removeImage(img: Base64Image) {
         >
           <el-icon><Picture /></el-icon>
           图片 {{ base64Images.length > 0 ? `(${base64Images.length})` : '' }}
+        </el-button>
+        <el-button size="small" @click="scrollToTop" title="回到顶部">
+          <el-icon><Top /></el-icon>
+        </el-button>
+        <el-button size="small" @click="scrollToBottom" title="到底部">
+          <el-icon><Bottom /></el-icon>
         </el-button>
         <el-button size="small" @click="showTagDialog">标签</el-button>
         <el-button size="small" :type="noteStore.currentNote.is_favorite ? 'warning' : 'default'"
@@ -419,7 +468,7 @@ function removeImage(img: Base64Image) {
 
   <div class="editor-empty" v-else>
     <el-icon :size="60"><Document /></el-icon>
-    <h2>NoteMaster</h2>
+    <h2>AmNote</h2>
     <p>选择或创建一篇笔记开始写作</p>
   </div>
 </template>

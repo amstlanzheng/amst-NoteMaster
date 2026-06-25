@@ -26,7 +26,7 @@ app.mount('#app')
 
 function initMockDb() {
   const notes: any[] = [
-    { id: 1, title: '欢迎使用 NoteMaster', content: '# 欢迎使用 NoteMaster\n\n这是一款**AI驱动**的个人知识管理平台。\n\n## 功能特点\n\n- 笔记管理\n- Markdown编辑\n- 分类管理\n- 标签系统\n- 全文搜索\n\n> 开始你的知识管理之旅吧！', content_type: 'markdown', category_id: 1, is_favorite: 0, is_pinned: 0, is_deleted: 0, created_at: '2026-06-10 10:00:00', updated_at: '2026-06-11 09:00:00' },
+    { id: 1, title: '欢迎使用 AmNote', content: '# 欢迎使用 AmNote\n\n这是一款**AI驱动**的个人知识管理平台。\n\n## 功能特点\n\n- 笔记管理\n- Markdown编辑\n- 分类管理\n- 标签系统\n- 全文搜索\n\n> 开始你的知识管理之旅吧！', content_type: 'markdown', category_id: 1, is_favorite: 0, is_pinned: 0, is_deleted: 0, created_at: '2026-06-10 10:00:00', updated_at: '2026-06-11 09:00:00' },
     { id: 2, title: 'Vue3 学习笔记', content: '## Vue3 Composition API\n\n```js\nimport { ref, computed } from \'vue\'\n\nconst count = ref(0)\nconst doubled = computed(() => count.value * 2)\n```\n\n使用 `<script setup>` 语法糖。', content_type: 'markdown', category_id: 2, is_favorite: 1, is_pinned: 0, is_deleted: 0, created_at: '2026-06-05 14:00:00', updated_at: '2026-06-08 16:00:00' },
     { id: 3, title: 'SpringBoot 项目配置', content: '# SpringBoot 项目搭建\n\n| 配置项 | 值 |\n|--------|------|\n| Java版本 | 17 |\n| SpringBoot | 3.x |\n| 数据库 | MySQL |\n\n```yaml\nserver:\n  port: 8080\n```', content_type: 'markdown', category_id: 1, is_favorite: 0, is_pinned: 1, is_deleted: 0, created_at: '2026-06-01 08:00:00', updated_at: '2026-06-03 11:00:00' },
     { id: 4, title: '旅游计划 - 日本', content: '- 东京\n- 大阪\n- 京都\n- 北海道', content_type: 'markdown', category_id: 3, is_favorite: 0, is_pinned: 0, is_deleted: 0, created_at: '2026-05-20 20:00:00', updated_at: '2026-05-25 10:00:00' },

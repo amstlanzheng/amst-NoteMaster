@@ -7,6 +7,7 @@ export interface Note {
   is_favorite: boolean
   is_pinned: boolean
   is_deleted: boolean
+  sort_weight: number
   created_at: string
   updated_at: string
   tags?: Tag[]
@@ -67,6 +68,8 @@ export interface FilterOptions {
   year?: number
   month?: number
   keyword?: string
+  sort_by?: 'updated_at' | 'created_at' | 'sort_weight'
+  sort_order?: 'asc' | 'desc'
 }
 
 export interface StatsData {

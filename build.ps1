@@ -1,5 +1,5 @@
 # ============================================================
-#  NoteMaster Build Script
+#  AmNote Build Script
 #  Usage:
 #    .\build.ps1                  Fast mode, unpacked dir only
 #    .\build.ps1 -installer       Generate NSIS installer (.exe)
@@ -40,7 +40,7 @@ function Abort      { param($msg) Write-Err $msg; pause; exit 1 }
 $modeLabel = if ($installer) { "NSIS Installer (.exe)" } else { "Unpacked Dir (verify)" }
 $checkLabel = if ($check) { "ON (typecheck + lint)" } else { "OFF" }
 Write-Host "============================================================" -ForegroundColor Magenta
-Write-Host "  NoteMaster Build Script" -ForegroundColor Magenta
+Write-Host "  AmNote Build Script" -ForegroundColor Magenta
 Write-Host "  Mode : $modeLabel" -ForegroundColor Magenta
 Write-Host "  Check: $checkLabel" -ForegroundColor Magenta
 Write-Host "============================================================" -ForegroundColor Magenta
@@ -247,13 +247,13 @@ Write-Host "  Build SUCCESS" -ForegroundColor Green
 Write-Host "  Elapsed: $elapsed s" -ForegroundColor Green
 Write-Host "  Mode   : $modeText" -ForegroundColor Green
 
-$exe = Get-ChildItem -Path $BUILD_OUTPUT_DIR -Filter "NoteMaster.exe" -Recurse | Select-Object -First 1
+$exe = Get-ChildItem -Path $BUILD_OUTPUT_DIR -Filter "AmNote.exe" -Recurse | Select-Object -First 1
 if ($exe) {
     Write-Host "  Path: $($exe.FullName)" -ForegroundColor Yellow
     Write-Host "  Size: $([math]::Round($exe.Length/1MB, 1)) MB" -ForegroundColor Yellow
 }
 if ($installer) {
-    $setup = Get-ChildItem -Path $BUILD_OUTPUT_DIR -Filter "NoteMaster Setup*.exe" -Recurse | Select-Object -First 1
+    $setup = Get-ChildItem -Path $BUILD_OUTPUT_DIR -Filter "AmNote Setup*.exe" -Recurse | Select-Object -First 1
     if ($setup) {
         Write-Host "  Installer: $($setup.FullName)" -ForegroundColor Yellow
         Write-Host "  Size: $([math]::Round($setup.Length/1MB, 1)) MB" -ForegroundColor Yellow

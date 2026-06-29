@@ -6,6 +6,7 @@ pkg-out/
 pack/
 output-exe/
 output-*/
+package/
 *.mjs
 !electron.vite.config.ts
 !vite.config.ts

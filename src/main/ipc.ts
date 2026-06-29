@@ -1,5 +1,5 @@
 import { ipcMain, dialog, app, BrowserWindow, shell } from 'electron'
-import { getAll, getOne, run, saveDb, getDb, getDbPath, initDatabase } from './database'
+import { getAll, getOne, run, getDb, getDbPath, initDatabase } from './database'
 import { testSftpConnection, uploadAllToRemote, downloadAllFromRemote, setTempSftpConfig } from './sftp'
 import { getMainWindow } from './window'
 import { join, basename, dirname } from 'path'
@@ -64,7 +64,20 @@ function registerIpcHandlers() {
       }
     }
 
-    sql += ' ORDER BY n.is_pinned DESC, n.updated_at DESC'
+    // 排序：置顶 > 权重 > 时间
+    const sortBy = filters.sort_by || 'updated_at'
+    const sortOrder = filters.sort_order || 'desc'
+    if (sortBy === 'sort_weight') {
+      sql += ' ORDER BY n.is_pinned DESC, n.sort_weight ASC, n.updated_at DESC'
+    } else if (sortBy === 'created_at') {
+      sql += sortOrder === 'asc'
+        ? ' ORDER BY n.is_pinned DESC, n.created_at ASC'
+        : ' ORDER BY n.is_pinned DESC, n.created_at DESC'
+    } else {
+      sql += sortOrder === 'asc'
+        ? ' ORDER BY n.is_pinned DESC, n.updated_at ASC'
+        : ' ORDER BY n.is_pinned DESC, n.updated_at DESC'
+    }
 
     const notes = getAll(sql, params)
 
@@ -102,8 +115,13 @@ function registerIpcHandlers() {
   })
 
   ipcMain.handle('db:update-note', (_event, id: number, data: Partial<Note>) => {
-    const fields: string[] = ["updated_at = datetime('now','localtime')"]
+    const fields: string[] = []
     const params: any[] = []
+
+    // 只有内容变更才更新 updated_at
+    if (data.title !== undefined || data.content !== undefined) {
+      fields.push("updated_at = datetime('now','localtime')")
+    }
 
     if (data.title !== undefined) { fields.push('title = ?'); params.push(data.title) }
     if (data.content !== undefined) { fields.push('content = ?'); params.push(data.content) }
@@ -132,6 +150,17 @@ function registerIpcHandlers() {
     } else {
       run("UPDATE notes SET is_deleted = 1, updated_at = datetime('now','localtime') WHERE id = ?", [id])
     }
+  })
+
+  ipcMain.handle('db:batch-delete-notes', (_event, ids: number[], permanent?: boolean) => {
+    if (!ids || ids.length === 0) return { deleted: 0 }
+    const placeholders = ids.map(() => '?').join(',')
+    if (permanent) {
+      run(`DELETE FROM notes WHERE id IN (${placeholders})`, ids)
+    } else {
+      run(`UPDATE notes SET is_deleted = 1, updated_at = datetime('now','localtime') WHERE id IN (${placeholders})`, ids)
+    }
+    return { deleted: ids.length }
   })
 
   ipcMain.handle('db:duplicate-note', (_event, id: number) => {
@@ -313,6 +342,27 @@ function registerIpcHandlers() {
 
   ipcMain.handle('db:restore-note', (_event, id: number) => {
     run("UPDATE notes SET is_deleted = 0, updated_at = datetime('now','localtime') WHERE id = ?", [id])
+  })
+
+  ipcMain.handle('db:empty-trash', () => {
+    try {
+      // 先获取要删除的笔记 ID
+      const deletedNotes = getAll('SELECT id FROM notes WHERE is_deleted = 1') as Array<{ id: number }>
+      if (deletedNotes.length === 0) return { deleted: 0 }
+      const ids = deletedNotes.map(n => n.id)
+      const placeholders = ids.map(() => '?').join(',')
+
+      // 按依赖顺序删除关联数据
+      run(`DELETE FROM note_tags WHERE note_id IN (${placeholders})`, ids)
+      run(`DELETE FROM note_versions WHERE note_id IN (${placeholders})`, ids)
+      run(`DELETE FROM external_files WHERE note_id IN (${placeholders})`, ids)
+      // 删除笔记
+      const result = run(`DELETE FROM notes WHERE is_deleted = 1`)
+      return { deleted: result.changes }
+    } catch (error: any) {
+      console.error('Empty trash error:', error)
+      return { deleted: 0, error: error.message }
+    }
   })
 
   ipcMain.handle('db:get-note-versions', (_event, noteId: number) => {
@@ -512,6 +562,10 @@ function registerIpcHandlers() {
 
   ipcMain.handle('db:rename-note', (_event, id: number, newTitle: string) => {
     run('UPDATE notes SET title = ?, updated_at = datetime(\'now\',\'localtime\') WHERE id = ?', [newTitle, id])
+  })
+
+  ipcMain.handle('db:update-note-weight', (_event, id: number, weight: number) => {
+    run('UPDATE notes SET sort_weight = ? WHERE id = ?', [weight, id])
   })
 
   ipcMain.handle('db:export-note-md', async (_event, id: number) => {
@@ -1633,93 +1687,6 @@ function formatFileSize(bytes: number): string {
     }
   })
 
-  // 添加外部文件记录（不复制文件、不创建笔记，仅记录到 external_files 表）
-  ipcMain.handle('file:add-external-files', async (_event, filePaths: string[]) => {
-    try {
-      const added: Array<{ filename: string; path: string; size: number }> = []
-      const skipped: string[] = []
-
-      for (const filePath of filePaths) {
-        if (!existsSync(filePath)) {
-          skipped.push(filePath)
-          continue
-        }
-
-        const filename = basename(filePath)
-        const stats = statSync(filePath)
-        const size = stats.size
-
-        // 检查是否已存在相同路径的记录
-        const existing = getOne('SELECT id FROM external_files WHERE original_path = ?', [filePath])
-        if (existing) {
-          skipped.push(filename)
-          continue
-        }
-
-        // 只记录到 external_files 表，category_id 和 note_id 为 null
-        run(
-          'INSERT INTO external_files (original_path, filename, size, category_id, note_id) VALUES (?, ?, ?, NULL, NULL)',
-          [filePath, filename, size]
-        )
-        added.push({ filename, path: filePath, size })
-      }
-
-      return { success: true, added, skipped }
-    } catch (error: any) {
-      return { success: false, error: error.message }
-    }
-  })
-
-  // 添加外部文件夹记录（递归扫描文件夹，只记录不导入）
-  ipcMain.handle('file:add-external-folder', async (_event, folderPath: string) => {
-    try {
-      if (!existsSync(folderPath)) {
-        return { success: false, error: '文件夹不存在' }
-      }
-
-      const added: Array<{ filename: string; path: string; size: number }> = []
-      const skipped: string[] = []
-
-      function scanDir(dir: string) {
-        const entries = readdirSync(dir)
-        for (const entry of entries) {
-          const fullPath = join(dir, entry)
-          const stats = statSync(fullPath)
-          if (stats.isDirectory()) {
-            scanDir(fullPath)
-          } else if (stats.isFile()) {
-            const filename = basename(fullPath)
-            const existing = getOne('SELECT id FROM external_files WHERE original_path = ?', [fullPath])
-            if (existing) {
-              skipped.push(filename)
-              continue
-            }
-            run(
-              'INSERT INTO external_files (original_path, filename, size, category_id, note_id) VALUES (?, ?, ?, NULL, NULL)',
-              [fullPath, filename, stats.size]
-            )
-            added.push({ filename, path: fullPath, size: stats.size })
-          }
-        }
-      }
-
-      scanDir(folderPath)
-      return { success: true, added, skipped }
-    } catch (error: any) {
-      return { success: false, error: error.message }
-    }
-  })
-
-  // 获取外部文件列表
-  ipcMain.handle('file:get-external-files', () => {
-    try {
-      const files = getAll('SELECT * FROM external_files ORDER BY imported_at DESC')
-      return { success: true, files }
-    } catch (error: any) {
-      return { success: false, error: error.message }
-    }
-  })
-
   // 设置当前查看的文件夹路径
   ipcMain.handle('file:set-current-viewing-path', (_event, path: string | null) => {
     try {
@@ -1744,24 +1711,6 @@ function formatFileSize(bytes: number): string {
       const result = getOne('SELECT value FROM settings WHERE key = ?', ['current_viewing_path'])
       console.log('[getCurrentViewingPath] Result:', result?.value || null)
       return { success: true, path: result?.value || null }
-    } catch (error: any) {
-      return { success: false, error: error.message }
-    }
-  })
-
-  // 【调试】查看所有外部文件记录
-  ipcMain.handle('file:debug-all-files', () => {
-    try {
-      const files = getAll('SELECT id, original_path, filename FROM external_files ORDER BY original_path') as Array<{
-        id: number
-        original_path: string
-        filename: string
-      }>
-      console.log('[debugAllFiles] Total files:', files.length)
-      if (files.length > 0) {
-        console.log('[debugAllFiles] Sample paths:', files.slice(0, 5).map(f => f.original_path))
-      }
-      return { success: true, files }
     } catch (error: any) {
       return { success: false, error: error.message }
     }
@@ -1905,15 +1854,6 @@ function formatFileSize(bytes: number): string {
     }
   })
 
-  // 删除外部文件记录
-  ipcMain.handle('file:delete-external-file', (_event, id: number) => {
-    try {
-      run('DELETE FROM external_files WHERE id = ?', [id])
-      return { success: true }
-    } catch (error: any) {
-      return { success: false, error: error.message }
-    }
-  })
 }
 
 function buildCategoryTree(categories: Category[]): Category[] {

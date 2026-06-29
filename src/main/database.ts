@@ -5,6 +5,7 @@ import { app } from 'electron'
 
 let db: Database | null = null
 let SQL: SqlJsStatic | null = null
+let saveTimer: ReturnType<typeof setTimeout> | null = null
 
 function resolveDbPath(): string {
   const candidates = [
@@ -35,6 +36,24 @@ function saveDb() {
   writeFileSync(DB_PATH, buffer)
 }
 
+// 防抖写入：高频更新时延迟写盘，避免每次 run() 都同步 I/O
+function debouncedSaveDb() {
+  if (saveTimer) clearTimeout(saveTimer)
+  saveTimer = setTimeout(() => {
+    saveDb()
+    saveTimer = null
+  }, 300)
+}
+
+// 立即写盘并取消待执行的防抖（用于需要确保数据持久化的场景）
+function flushSaveDb() {
+  if (saveTimer) {
+    clearTimeout(saveTimer)
+    saveTimer = null
+  }
+  saveDb()
+}
+
 function locateWasm(): string {
   const isDev = !app.isPackaged
   if (isDev) {
@@ -57,8 +76,10 @@ export async function initDatabase(): Promise<Database> {
   }
 
   db.run('PRAGMA foreign_keys = ON')
+  db.run('BEGIN TRANSACTION')
   initTables()
-  saveDb()
+  db.run('COMMIT')
+  flushSaveDb()
   return db
 }
 
@@ -94,6 +115,7 @@ function initTables() {
       is_favorite INTEGER DEFAULT 0,
       is_pinned INTEGER DEFAULT 0,
       is_deleted INTEGER DEFAULT 0,
+      sort_weight INTEGER DEFAULT 999,
       created_at TEXT DEFAULT (datetime('now','localtime')),
       updated_at TEXT DEFAULT (datetime('now','localtime'))
     )
@@ -185,6 +207,24 @@ function initTables() {
         ['AI 学习路线', '# AI 学习路线\n\n1. 数学基础\n2. Python\n3. 机器学习\n4. 深度学习\n5. NLP', 2, 1])
     }
   }
+
+  // 清理 external_files 表中的孤立记录（该表已不再使用）
+  try {
+    db.run('DELETE FROM external_files')
+  } catch {
+    // 表可能不存在，忽略
+  }
+
+  // 迁移：为已有 notes 表添加 sort_weight 列
+  try {
+    const columns = db.exec("PRAGMA table_info(notes)")
+    const hasSortWeight = columns[0]?.values?.some((col: any) => col[1] === 'sort_weight')
+    if (!hasSortWeight) {
+      db.run('ALTER TABLE notes ADD COLUMN sort_weight INTEGER DEFAULT 999')
+    }
+  } catch {
+    // 忽略迁移错误
+  }
 }
 
 function getAll(sql: string, params: any[] = []): any[] {
@@ -216,7 +256,7 @@ function run(sql: string, params: any[] = []): { lastInsertRowid: number; change
   db.run(sql, params)
   const lastId = (db.exec('SELECT last_insert_rowid() as id')[0]?.values[0][0] as number) || 0
   const changes = db.getRowsModified()
-  saveDb()
+  debouncedSaveDb()
   return { lastInsertRowid: lastId, changes }
 }
 
@@ -229,4 +269,4 @@ export function getDb() {
   }
 }
 
-export { getAll, getOne, run, saveDb }
+export { getAll, getOne, run, saveDb, flushSaveDb }

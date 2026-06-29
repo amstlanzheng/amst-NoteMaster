@@ -736,56 +736,12 @@ function setCurrentViewingPath(path: string) {
   loadExternalFiles()
 }
 
-// 【调试】查看所有外部文件记录
-async function debugExternalFiles() {
-  try {
-    const result = await window.api.debugAllFiles()
-    console.log('[debugExternalFiles] Result:', result)
-    if (result.success && result.files) {
-      ElMessage.info(`数据库中共有 ${result.files.length} 个外部文件`)
-      if (result.files.length > 0) {
-        console.table(result.files.slice(0, 10)) // 只显示前10条
-      }
-    } else {
-      ElMessage.error('查询失败')
-    }
-  } catch (error) {
-    console.error('调试查询失败:', error)
-    ElMessage.error('查询失败')
-  }
-}
-
 // 格式化文件大小
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return bytes + ' B'
   if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
   if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
   return (bytes / (1024 * 1024 * 1024)).toFixed(1) + ' GB'
-}
-
-// 删除外部文件记录
-async function deleteExternalFileRecord(id: number) {
-  try {
-    await ElMessageBox.confirm(
-      '确定要删除这条外部文件记录吗？（不会删除实际文件）',
-      '删除记录',
-      {
-        confirmButtonText: '确定',
-        cancelButtonText: '取消',
-        type: 'warning'
-      }
-    )
-    
-    const result = await window.api.deleteExternalFile(id)
-    if (result.success) {
-      ElMessage.success('记录已删除')
-      await loadExternalFiles()
-    } else {
-      ElMessage.error('删除失败')
-    }
-  } catch (error) {
-    // 用户取消
-  }
 }
 
 // 用系统默认程序打开外部文件
@@ -963,7 +919,9 @@ const isActive = (path: string) => route.path === path
     <el-scrollbar class="sidebar-scroll-content">
 
       <div v-if="categoryStore.favoriteCategories.length > 0" class="sidebar-section">
-        <div class="section-title">⭐ 收藏的分类</div>
+        <div class="section-header">
+          <span class="section-title">⭐ 收藏的分类</span>
+        </div>
         <CategoryTreeItem
           v-for="fav in categoryStore.favoriteCategories"
           :key="fav.id"
@@ -1011,7 +969,9 @@ const isActive = (path: string) => route.path === path
       </div>
 
       <div class="sidebar-section">
-        <div class="section-title">日期归档</div>
+        <div class="section-header">
+          <span class="section-title">日期归档</span>
+        </div>
         <div v-for="year in archiveYears" :key="year">
           <div class="menu-item" @click="toggleYear(year)">
             <el-icon><component :is="expandedYear === year ? 'ArrowDown' : 'ArrowRight'" /></el-icon>
@@ -1026,7 +986,9 @@ const isActive = (path: string) => route.path === path
       </div>
 
       <div class="sidebar-section">
-        <div class="section-title">标签</div>
+        <div class="section-header">
+          <span class="section-title">标签</span>
+        </div>
         <div 
           class="menu-item tag-item" 
           :class="{ active: noteStore.filters.tag_id === 0 }"
@@ -1069,16 +1031,7 @@ const isActive = (path: string) => route.path === path
               <el-icon><ArrowRight /></el-icon>
             </el-button>
           </div>
-          <!-- 调试按钮 -->
-          <el-button 
-            v-if="showExternalFiles" 
-            size="small" 
-            text 
-            @click.stop="debugExternalFiles" 
-            title="调试：查看数据库中的文件"
-            style="margin-left: auto; color: #f56c6c;">
-            🔍
-          </el-button>
+
         </div>
         
         <el-scrollbar v-if="showExternalFiles" class="external-files-list">
@@ -1088,7 +1041,6 @@ const isActive = (path: string) => route.path === path
             :tree="fileTree"
             @preview="previewExternalFile"
             @open="openExternalFile"
-            @delete="deleteExternalFileRecord"
             @dragstart="handleExternalFileDragStart"
           />
           
@@ -1224,6 +1176,7 @@ const isActive = (path: string) => route.path === path
 .menu-item[draggable="true"]:active { cursor: grabbing; }
 .section-header { display: flex; align-items: center; justify-content: space-between; padding: 16px 12px 8px; }
 .section-title { font-size: 11px; font-weight: 600; text-transform: uppercase; color: var(--text-tertiary); letter-spacing: 0.5px; }
+.sidebar-section { padding: 0 4px; }
 .add-cat-row { display: flex; gap: 4px; padding: 4px 12px 8px; align-items: center; }
 
 /* 拖拽分隔条样式 */

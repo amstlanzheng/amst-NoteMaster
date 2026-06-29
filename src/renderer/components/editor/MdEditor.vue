@@ -62,13 +62,16 @@ const base64Images = computed<Base64Image[]>(() => {
 })
 
 const showImagePanel = ref(false)
+const isNoteSwitching = ref(false)
 
 watch(() => noteStore.currentNote, (note) => {
   if (note) {
+    isNoteSwitching.value = true
     editTitle.value = note.title || ''
     editContent.value = note.content || ''
     contentType.value = (note.content_type as 'markdown' | 'html') || 'markdown'
     noteTags.value = note.tags || []
+    nextTick(() => { isNoteSwitching.value = false })
   }
 }, { immediate: true })
 
@@ -87,6 +90,7 @@ function triggerAutoSave() {
 }
 
 watch([editTitle, editContent, contentType], () => {
+  if (isNoteSwitching.value) return
   triggerAutoSave()
 })
 
@@ -115,17 +119,87 @@ function togglePin() {
 }
 
 function insertMarkdown(syntax: string) {
-  if (syntax === 'bold') editContent.value += '****'
-  else if (syntax === 'italic') editContent.value += '**'
-  else if (syntax === 'code') editContent.value += '\n```\n\n```\n'
-  else if (syntax === 'h1') editContent.value += '\n# '
-  else if (syntax === 'h2') editContent.value += '\n## '
-  else if (syntax === 'h3') editContent.value += '\n### '
-  else if (syntax === 'quote') editContent.value += '\n> '
-  else if (syntax === 'list') editContent.value += '\n- '
-  else if (syntax === 'link') editContent.value += '[]()'
-  else if (syntax === 'table') editContent.value += '\n| 列1 | 列2 |\n| --- | --- |\n|  |  |\n'
+  const textarea = document.querySelector('.edit-textarea') as HTMLTextAreaElement
+  if (!textarea) {
+    editContent.value += getMarkdownSyntax(syntax)
+    triggerAutoSave()
+    return
+  }
+  textarea.focus()
+  const start = textarea.selectionStart
+  const end = textarea.selectionEnd
+  const selected = editContent.value.substring(start, end)
+  
+  let insertion = ''
+  let cursorOffset = 0
+
+  if (syntax === 'bold') {
+    insertion = selected ? `**${selected}**` : `****`
+    cursorOffset = selected ? insertion.length : 2
+  } else if (syntax === 'italic') {
+    insertion = selected ? `*${selected}*` : `**`
+    cursorOffset = selected ? insertion.length : 1
+  } else if (syntax === 'code') {
+    insertion = selected ? `\`${selected}\`` : '\n```\n\n```\n'
+    cursorOffset = selected ? insertion.length : 6
+  } else if (syntax === 'h1') {
+    insertion = selected ? `\n# ${selected}` : '\n# '
+    cursorOffset = insertion.length
+  } else if (syntax === 'h2') {
+    insertion = selected ? `\n## ${selected}` : '\n## '
+    cursorOffset = insertion.length
+  } else if (syntax === 'h3') {
+    insertion = selected ? `\n### ${selected}` : '\n### '
+    cursorOffset = insertion.length
+  } else if (syntax === 'quote') {
+    insertion = selected ? `\n> ${selected}` : '\n> '
+    cursorOffset = insertion.length
+  } else if (syntax === 'list') {
+    insertion = selected ? `\n- ${selected}` : '\n- '
+    cursorOffset = insertion.length
+  } else if (syntax === 'link') {
+    insertion = selected ? `[${selected}]()` : `[]()`
+    cursorOffset = selected ? insertion.length - 1 : 1
+  } else if (syntax === 'table') {
+    insertion = '\n| 列1 | 列2 |\n| --- | --- |\n|  |  |\n'
+    cursorOffset = insertion.length
+  } else {
+    insertion = getMarkdownSyntax(syntax)
+    cursorOffset = insertion.length
+  }
+
+  // 使用 execCommand 插入文本，支持 Ctrl+Z 撤销
+  if (selected) {
+    // 先删除选中文本，再插入新文本
+    document.execCommand('insertText', false, insertion)
+  } else {
+    document.execCommand('insertText', false, insertion)
+  }
+  nextTick(() => {
+    textarea.selectionStart = textarea.selectionEnd = start + cursorOffset
+  })
   triggerAutoSave()
+}
+
+function getMarkdownSyntax(syntax: string): string {
+  if (syntax === 'bold') return '****'
+  if (syntax === 'italic') return '**'
+  if (syntax === 'code') return '\n```\n\n```\n'
+  if (syntax === 'h1') return '\n# '
+  if (syntax === 'h2') return '\n## '
+  if (syntax === 'h3') return '\n### '
+  if (syntax === 'quote') return '\n> '
+  if (syntax === 'list') return '\n- '
+  if (syntax === 'link') return '[]()'
+  if (syntax === 'table') return '\n| 列1 | 列2 |\n| --- | --- |\n|  |  |\n'
+  return ''
+}
+
+function handleTab(event: KeyboardEvent) {
+  const textarea = event.target as HTMLTextAreaElement
+  textarea.focus()
+  // 使用 execCommand 插入文本，这样浏览器会将其记录到撤销栈，Ctrl+Z 可以撤销
+  document.execCommand('insertText', false, '  ')
 }
 
 const tagDialogVisible = ref(false)
@@ -397,6 +471,7 @@ function removeImage(img: Base64Image) {
           placeholder="开始写作..." 
           @input="triggerAutoSave" 
           @paste="handlePasteImage"
+          @keydown.tab.prevent="handleTab"
         />
       </div>
       <div class="preview-pane" v-if="editMode !== 'edit'" ref="previewPaneRef" @scroll="onPreviewPaneScroll"

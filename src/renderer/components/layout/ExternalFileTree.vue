@@ -26,7 +26,6 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'preview', file: { id: number; original_path: string; filename: string; size: number; imported_at: string }): void
   (e: 'open', filePath: string): void
-  (e: 'delete', fileId: number): void
   (e: 'dragstart', event: DragEvent, file: { id: number; original_path: string; filename: string; size: number; imported_at: string }): void
 }>()
 
@@ -156,15 +155,6 @@ defineExpose({
           >
             <el-icon><FolderOpened /></el-icon>
           </el-button>
-          <el-button 
-            size="small" 
-            text 
-            type="danger"
-            @click.stop="emit('delete', node.files![0].id)"
-            title="删除记录"
-          >
-            <el-icon><Delete /></el-icon>
-          </el-button>
         </div>
       </template>
       
@@ -192,7 +182,6 @@ defineExpose({
               :tree="node.children"
               @preview="(file) => emit('preview', file)"
               @open="(path) => emit('open', path)"
-              @delete="(id) => emit('delete', id)"
               @dragstart="(event, file) => emit('dragstart', event, file)"
             />
             
@@ -225,15 +214,6 @@ defineExpose({
                   title="用系统程序打开"
                 >
                   <el-icon><FolderOpened /></el-icon>
-                </el-button>
-                <el-button 
-                  size="small" 
-                  text 
-                  type="danger"
-                  @click.stop="emit('delete', file.id)"
-                  title="删除记录"
-                >
-                  <el-icon><Delete /></el-icon>
                 </el-button>
               </div>
             </div>

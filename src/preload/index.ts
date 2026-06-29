@@ -7,8 +7,10 @@ const api = {
   createNote: (data: Partial<Note>) => ipcRenderer.invoke('db:create-note', data),
   updateNote: (id: number, data: Partial<Note>) => ipcRenderer.invoke('db:update-note', id, data),
   deleteNote: (id: number, permanent?: boolean) => ipcRenderer.invoke('db:delete-note', id, permanent),
+  batchDeleteNotes: (ids: number[], permanent?: boolean) => ipcRenderer.invoke('db:batch-delete-notes', ids, permanent),
   duplicateNote: (id: number) => ipcRenderer.invoke('db:duplicate-note', id),
   renameNote: (id: number, newTitle: string) => ipcRenderer.invoke('db:rename-note', id, newTitle),
+  updateNoteWeight: (id: number, weight: number) => ipcRenderer.invoke('db:update-note-weight', id, weight),
   exportNoteMd: (id: number) => ipcRenderer.invoke('db:export-note-md', id),
   exportNoteHtml: (id: number) => ipcRenderer.invoke('db:export-note-html', id),
 
@@ -44,6 +46,7 @@ const api = {
 
   getTrashNotes: () => ipcRenderer.invoke('db:get-trash-notes'),
   restoreNote: (id: number) => ipcRenderer.invoke('db:restore-note', id),
+  emptyTrash: () => ipcRenderer.invoke('db:empty-trash'),
 
   getNoteVersions: (noteId: number) => ipcRenderer.invoke('db:get-note-versions', noteId),
   restoreVersion: (noteId: number, versionId: number) => ipcRenderer.invoke('db:restore-version', noteId, versionId),
@@ -66,14 +69,9 @@ const api = {
   importFile: (filePath: string, categoryId: number | null = null) => ipcRenderer.invoke('file:import-file', filePath, categoryId),
   importFolder: (folderPath: string, categoryId: number | null = null) => ipcRenderer.invoke('file:import-folder', folderPath, categoryId),
   resolveFileConflict: (data: { action: 'overwrite' | 'rename' | 'skip'; originalPath: string; filename: string; categoryId: number | null }) => ipcRenderer.invoke('file:resolve-conflict', data),
-  addExternalFiles: (filePaths: string[]) => ipcRenderer.invoke('file:add-external-files', filePaths),
-  addExternalFolder: (folderPath: string) => ipcRenderer.invoke('file:add-external-folder', folderPath),
-  getExternalFiles: () => ipcRenderer.invoke('file:get-external-files'),
   setCurrentViewingPath: (path: string | null) => ipcRenderer.invoke('file:set-current-viewing-path', path),
   getCurrentViewingPath: () => ipcRenderer.invoke('file:get-current-viewing-path'),
-  debugAllFiles: () => ipcRenderer.invoke('file:debug-all-files'),
   scanExternalDirs: (parentPath?: string) => ipcRenderer.invoke('file:scan-external-dirs', parentPath),
-  deleteExternalFile: (id: number) => ipcRenderer.invoke('file:delete-external-file', id),
   openExternalFile: (filePath: string) => ipcRenderer.invoke('file:open-external', filePath),
   saveExternalFile: (filePath: string, base64Content: string) => ipcRenderer.invoke('file:save-external', filePath, base64Content),
 

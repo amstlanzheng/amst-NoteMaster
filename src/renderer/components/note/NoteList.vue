@@ -16,6 +16,8 @@ const uiStore = useUiStore()
 const noteContextMenu = ref({ visible: false, x: 0, y: 0, note: null as Note | null })
 const batchMode = ref(false)
 const selectedIds = ref<Set<number>>(new Set())
+const batchDeleting = ref(false)
+const batchProgress = ref({ current: 0, total: 0 })
 
 // 当前选中分类的直接子分类（用于在列表中显示为文件夹）
 const childCategories = computed(() => {
@@ -105,12 +107,22 @@ function getSubCategoryName(note: Note): string | null {
 }
 
 const sortedNotes = computed(() => {
-  const arr = [...noteStore.notes]
-  return arr.sort((a, b) => {
-    if (a.is_pinned !== b.is_pinned) return a.is_pinned ? -1 : 1
-    return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
-  })
+  // 后端已按排序规则返回，前端只需直接使用
+  return [...noteStore.notes]
 })
+
+const sortLabel = computed(() => {
+  if (uiStore.noteSortBy === 'sort_weight') return '权重'
+  if (uiStore.noteSortBy === 'created_at') return '创建'
+  return '更新'
+})
+
+function handleSortChange(command: string) {
+  const [sortBy, sortOrder] = command.split('-') as [string, string]
+  uiStore.noteSortBy = sortBy as any
+  uiStore.noteSortOrder = sortOrder as any
+  noteStore.fetchNotes()
+}
 
 const listState = computed<'loading' | 'empty' | 'notes'>(() => {
   if (noteStore.loading) return 'loading'
@@ -277,6 +289,26 @@ async function menuDelete() {
   } catch { /* cancel */ }
 }
 
+async function menuSetWeight() {
+  const note = noteContextMenu.value.note
+  if (!note) return
+  closeNoteMenu()
+  try {
+    const { value } = await ElMessageBox.prompt('权重数字越小排序越靠前（置顶笔记优先）', '设置权重', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      inputValue: String(note.sort_weight ?? 999),
+      inputPattern: /^-?\d+$/,
+      inputErrorMessage: '请输入整数'
+    })
+    const weight = parseInt(value, 10)
+    await window.api.updateNoteWeight(note.id, weight)
+    note.sort_weight = weight
+    noteStore.fetchNotes()
+    ElMessage.success('权重已更新')
+  } catch { /* cancel */ }
+}
+
 function downloadText(content: string, filename: string, mime: string) {
   const blob = new Blob([content], { type: mime })
   const url = URL.createObjectURL(blob)
@@ -328,12 +360,20 @@ async function batchDelete() {
       '批量删除',
       { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' }
     )
-    for (const id of selectedIds.value) {
-      await noteStore.deleteNote(id)
+    const ids = Array.from(selectedIds.value)
+    batchDeleting.value = true
+    batchProgress.value = { current: 0, total: ids.length }
+
+    try {
+      // 使用批量删除 API，一次性删除所有选中笔记
+      await noteStore.batchDeleteNotes(ids)
+      batchProgress.value.current = ids.length
+      selectedIds.value = new Set()
+      batchMode.value = false
+      ElMessage.success(`已删除 ${ids.length} 篇笔记`)
+    } finally {
+      batchDeleting.value = false
     }
-    selectedIds.value = new Set()
-    batchMode.value = false
-    ElMessage.success(`已删除 ${count} 篇笔记`)
   } catch { /* cancel */ }
 }
 </script>
@@ -343,6 +383,21 @@ async function batchDelete() {
     <div class="list-header">
       <span class="list-title">{{ currentFilterTitle }}</span>
       <div class="header-actions">
+        <el-dropdown v-if="!batchMode" trigger="click" @command="handleSortChange">
+          <el-button size="small" text title="排序方式">
+            <el-icon><Top /></el-icon>
+            <span class="sort-label">{{ sortLabel }}</span>
+          </el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="updated_at-desc" :class="{ 'is-active': uiStore.noteSortBy === 'updated_at' && uiStore.noteSortOrder === 'desc' }">更新时间 新→旧</el-dropdown-item>
+              <el-dropdown-item command="updated_at-asc" :class="{ 'is-active': uiStore.noteSortBy === 'updated_at' && uiStore.noteSortOrder === 'asc' }">更新时间 旧→新</el-dropdown-item>
+              <el-dropdown-item command="created_at-desc" :class="{ 'is-active': uiStore.noteSortBy === 'created_at' && uiStore.noteSortOrder === 'desc' }">创建时间 新→旧</el-dropdown-item>
+              <el-dropdown-item command="created_at-asc" :class="{ 'is-active': uiStore.noteSortBy === 'created_at' && uiStore.noteSortOrder === 'asc' }">创建时间 旧→新</el-dropdown-item>
+              <el-dropdown-item command="sort_weight-asc" :class="{ 'is-active': uiStore.noteSortBy === 'sort_weight' }">自定义权重</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
         <el-button v-if="!batchMode" size="small" text @click="toggleBatchMode">批量</el-button>
         <template v-if="batchMode">
           <el-button size="small" @click="selectAll">{{ selectedIds.size === sortedNotes.length ? '取消全选' : '全选' }}</el-button>
@@ -418,6 +473,7 @@ async function batchDelete() {
                 {{ getSubCategoryName(note) }}
               </span>
               <span class="card-date">{{ formatRelative(note.updated_at) }}</span>
+              <span v-if="uiStore.noteSortBy === 'sort_weight' && note.sort_weight" class="card-weight">W:{{ note.sort_weight }}</span>
             </div>
           </div>
         </div>
@@ -437,11 +493,29 @@ async function batchDelete() {
           <el-icon><Download /></el-icon> 导出 HTML
         </div>
         <div class="context-menu-divider"></div>
+        <div class="context-menu-item" @click="menuSetWeight">
+          <el-icon><Top /></el-icon> 设置权重
+        </div>
+        <div class="context-menu-divider"></div>
         <div class="context-menu-item danger" @click="menuDelete">
           <el-icon><Delete /></el-icon> 删除
         </div>
       </div>
     </Teleport>
+
+    <!-- 批量删除进度遮罩 -->
+    <div v-if="batchDeleting" class="batch-delete-overlay">
+      <div class="batch-delete-dialog">
+        <el-icon class="is-loading" :size="24"><Loading /></el-icon>
+        <span class="batch-delete-text">正在删除 {{ batchProgress.total }} 篇笔记...</span>
+        <el-progress
+          :percentage="batchProgress.total > 0 ? Math.round(batchProgress.current / batchProgress.total * 100) : 0"
+          :stroke-width="6"
+          :show-text="true"
+          style="width: 200px"
+        />
+      </div>
+    </div>
   </div>
 </template>
 
@@ -449,6 +523,8 @@ async function batchDelete() {
 .note-list { height: 100%; display: flex; flex-direction: column; }
 .list-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--border-color); }
 .header-actions { display: flex; align-items: center; gap: 6px; }
+.sort-label { font-size: 12px; margin-left: 2px; }
+:deep(.el-dropdown-menu__item.is-active) { color: var(--el-color-primary); font-weight: 600; }
 .list-title { font-size: 15px; font-weight: 600; }
 .list-content { flex: 1; }
 .note-card { padding: 12px 16px; cursor: pointer; border-bottom: 1px solid var(--border-color); transition: background 0.15s ease; user-select: none; display: flex; align-items: flex-start; gap: 10px; }
@@ -462,6 +538,7 @@ async function batchDelete() {
 .fav-icon { color: #f5a623; font-size: 12px; }
 .card-preview { font-size: 12px; color: var(--text-tertiary); line-height: 1.5; margin-bottom: 8px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .card-meta { display: flex; align-items: center; justify-content: space-between; font-size: 11px; color: var(--text-tertiary); gap: 8px; }
+.card-weight { font-size: 10px; color: var(--accent-color); background: rgba(64, 158, 255, 0.1); padding: 1px 4px; border-radius: 3px; white-space: nowrap; }
 .card-tags { display: flex; gap: 6px; flex-wrap: wrap; }
 .sub-category-badge {
   display: inline-flex;
@@ -552,5 +629,34 @@ async function batchDelete() {
   min-width: 18px;
   text-align: center;
   flex-shrink: 0;
+}
+
+.batch-delete-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+
+.batch-delete-dialog {
+  background: var(--el-bg-color, #fff);
+  border-radius: 12px;
+  padding: 32px 40px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+}
+
+.batch-delete-text {
+  font-size: 14px;
+  color: var(--el-text-color-primary, #303133);
 }
 </style>

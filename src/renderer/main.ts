@@ -3,7 +3,12 @@ import { createPinia } from 'pinia'
 import ElementPlus from 'element-plus'
 import 'element-plus/dist/index.css'
 import zhCn from 'element-plus/es/locale/lang/zh-cn'
-import * as ElementPlusIconsVue from '@element-plus/icons-vue'
+import {
+  Loading, Folder, Document, Top, StarFilled, Edit, Download, Delete,
+  Close, View, Picture, Bottom, Search, Sunny, Moon, FolderAdd,
+  ArrowDown, ArrowRight, Calendar, Star, Brush, Plus, Upload,
+  CollectionTag, DataAnalysis, Setting, FolderOpened, DocumentAdd
+} from '@element-plus/icons-vue'
 import App from './App.vue'
 import router from './router'
 import './assets/styles/global.css'
@@ -15,7 +20,14 @@ if (!window.api) {
 
 const app = createApp(App)
 
-for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
+// 仅注册实际使用的图标组件
+const icons: Record<string, any> = {
+  Loading, Folder, Document, Top, StarFilled, Edit, Download, Delete,
+  Close, View, Picture, Bottom, Search, Sunny, Moon, FolderAdd,
+  ArrowDown, ArrowRight, Calendar, Star, Brush, Plus, Upload,
+  CollectionTag, DataAnalysis, Setting, FolderOpened, DocumentAdd
+}
+for (const [key, component] of Object.entries(icons)) {
   app.component(key, component)
 }
 
@@ -111,6 +123,16 @@ function createMockApi(db: any) {
         const note = db.notes.find((n: any) => n.id === id)
         if (note) note.is_deleted = 1
       }
+    },
+    batchDeleteNotes: async (ids: number[], permanent?: boolean) => {
+      if (permanent) {
+        db.notes = db.notes.filter((n: any) => !ids.includes(n.id))
+      } else {
+        db.notes.forEach((n: any) => {
+          if (ids.includes(n.id)) n.is_deleted = 1
+        })
+      }
+      return { deleted: ids.length }
     },
     duplicateNote: async (id: number) => {
       const note = db.notes.find((n: any) => n.id === id)

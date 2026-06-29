@@ -1,7 +1,7 @@
 import { app, globalShortcut, Tray, Menu, nativeImage, NativeImage } from 'electron'
 import { getMainWindow, createMainWindow } from './window'
 import { registerIpcHandlers } from './ipc'
-import { initDatabase } from './database'
+import { initDatabase, flushSaveDb } from './database'
 import { join } from 'path'
 import { existsSync, mkdirSync, writeFileSync } from 'fs'
 
@@ -275,8 +275,9 @@ app.whenReady().then(async () => {
   })
 
   app.on('before-quit', () => {
-    ;(app as any).isQuitting = true
-  })
+  ;(app as any).isQuitting = true
+  flushSaveDb()
+})
 })
 
 app.on('window-all-closed', () => {

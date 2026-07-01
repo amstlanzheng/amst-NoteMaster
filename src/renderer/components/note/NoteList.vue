@@ -55,6 +55,7 @@ function findCategoryInTree(cats: Category[], id: number): Category | null {
 // 点击子分类文件夹
 function enterSubCategory(catId: number) {
   categoryStore.selectCategory(catId)
+  noteStore.currentNote = null
   noteStore.setFilters({ category_id: catId })
 }
 

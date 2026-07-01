@@ -91,6 +91,7 @@ function navigate(path: string) {
 function selectCategory(catId: number | null) {
   currentCategoryId.value = catId
   categoryStore.selectCategory(catId)
+  noteStore.currentNote = null
   noteStore.setFilters({ category_id: catId })
   router.push('/')
 }
@@ -102,6 +103,7 @@ function selectTag(tagId: number) {
     noteStore.clearFilters()
   } else {
     // 选中新标签
+    noteStore.currentNote = null
     noteStore.setFilters({ tag_id: tagId })
   }
   router.push('/')
@@ -113,12 +115,14 @@ function selectNoTag() {
     noteStore.clearFilters()
   } else {
     // 使用特殊值 0 表示筛选无标签的笔记
+    noteStore.currentNote = null
     noteStore.setFilters({ tag_id: 0 })
   }
   router.push('/')
 }
 
 function selectArchive(year: number, month?: number) {
+  noteStore.currentNote = null
   noteStore.setFilters({ year, month })
   router.push('/')
 }
@@ -665,6 +669,43 @@ onMounted(async () => {
   loadLayout() // 加载保存的布局
   // 监听外部文件变更事件
   window.addEventListener('external-files-changed', loadExternalFiles)
+
+  // 监听菜单事件
+  window.api.onMenuOpenFolder(async () => {
+    const result = await window.api.openFileDialog({ properties: ['openDirectory'], title: '选择文件夹' })
+    if (!result.canceled && result.filePaths.length > 0) {
+      const path = result.filePaths[0]
+      await window.api.setCurrentViewingPath(path)
+      setCurrentViewingPath(path)
+      ElMessage.success('已切换到文件夹: ' + path.split(/[\\/]/).pop())
+    }
+  })
+
+  window.api.onMenuOpenFile(async () => {
+    const result = await window.api.openFileDialog({
+      properties: ['openFile', 'multiSelections'],
+      title: '导入文件',
+      filters: [
+        { name: '支持的文件', extensions: ['md', 'txt', 'markdown', 'html', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'pdf'] }
+      ]
+    })
+    if (!result.canceled && result.filePaths.length > 0) {
+      const categoryId = categoryStore.selectedCategoryId
+      for (const filePath of result.filePaths) {
+        try {
+          await window.api.importFile(filePath, categoryId)
+        } catch (e) {
+          console.error('导入文件失败:', filePath, e)
+        }
+      }
+      noteStore.fetchNotes()
+      ElMessage.success(`已导入 ${result.filePaths.length} 个文件`)
+    }
+  })
+
+  window.api.onMenuViewStats(() => {
+    router.push('/stats')
+  })
 })
 
 onUnmounted(() => {

@@ -4,6 +4,17 @@
 
 ## 文档导航
 
+### v1.02 变更文档（2026-07-01）
+
+```
+doc/v1.02/
+├── 01-image-paste-at-cursor.md         # 图片粘贴插入到光标位置
+├── 02-category-click-clear-editor.md   # 分类切换时清除编辑器内容
+├── 03-linkify-disable-and-intercept.md # Markdown 链接识别与跳转优化
+├── 04-ctrl-s-save.md                   # Ctrl+S 快捷键保存
+└── 05-external-image-relative-path.md  # 外部文件 Markdown 相对路径图片显示
+```
+
 ### v1.01 变更文档（2026-06-26）
 
 ```
@@ -55,6 +66,11 @@ npm run package          # 打包便携版 exe
 
 - **数据库**：sql.js (WASM)，防抖写入 300ms，退出前 flushSaveDb()
 - **排序**：置顶 > 权重(ASC) > 时间(DESC)，默认权重 999
-- **编辑器**：execCommand 插入文本以支持 Ctrl+Z 撤销
+- **编辑器**：execCommand 插入文本以支持 Ctrl+Z 撤销；Ctrl+S 立即保存
 - **Element Plus**：unplugin 按需引入 + 手动注册 28 个图标
 - **Mock API**：浏览器环境自动启用内存模拟
+- **Markdown 渲染**：linkify 关闭，防止 `.md` 文件名被误识别为链接；自定义 `link_open` 规则添加 `target="_blank"`
+- **链接跳转**：预览面板拦截链接点击，`.md` 文件应用内跳转，外部链接系统浏览器打开
+- **自定义协议**：`amnote://files/` 映射应用数据目录，`amnote://local/` 映射任意本地文件（用于外部 Markdown 图片）
+- **图片粘贴**：在光标位置插入，非追加到末尾
+- **分类切换**：切换分类/标签/归档时清除 `currentNote`，编辑器回到未选中状态

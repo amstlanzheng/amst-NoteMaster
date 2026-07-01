@@ -1,18 +1,92 @@
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { renderMarkdown } from '../utils/markdown'
 
 const route = useRoute()
+const router = useRouter()
 const filePath = ref('')
 const fileName = ref('')
-const fileType = ref('') // 'image' | 'text' | 'other'
+const fileType = ref('') // 'image' | 'markdown' | 'text' | 'other'
 const fileContent = ref('')
 const originalContent = ref('') // 保存原始内容用于检测修改
 const imageUrl = ref('')
 const loading = ref(false)
 const isEditing = ref(false) // 是否处于编辑模式
 const isModified = ref(false) // 是否有未保存的修改
+const mdViewMode = ref<'render' | 'source'>('render') // Markdown 预览模式
+
+const renderedMarkdown = computed(() => {
+  if (fileType.value !== 'markdown' || !fileContent.value) return ''
+  // 计算当前文件所在目录，用于解析相对路径图片
+  const baseDir = filePath.value ? filePath.value.replace(/\\/g, '/').substring(0, filePath.value.replace(/\\/g, '/').lastIndexOf('/')) : ''
+  return renderMarkdown(fileContent.value, baseDir)
+})
+
+// 拦截 Markdown 预览中的链接点击
+// .md 文件链接在应用内跳转预览，其他链接用外部浏览器打开
+const markdownBodyRef = ref<HTMLElement | null>(null)
+
+function handleMarkdownLinkClick(event: MouseEvent) {
+  const target = event.target as HTMLElement
+  const anchor = target.closest('a') as HTMLAnchorElement | null
+  if (!anchor || !anchor.href) return
+
+  event.preventDefault()
+  // markdown-it 会对 href 进行 URL 编码（如中文变为 %XX），需要解码
+  const href = decodeURIComponent(anchor.getAttribute('href') || '')
+
+  // 判断是否为 .md/.markdown 文件的相对路径链接
+  const mdExtRegex = /\.(md|markdown)$/i
+  if (mdExtRegex.test(href)) {
+    // 解析相对路径：基于当前文件所在目录
+    const currentDir = filePath.value.substring(0, filePath.value.replace(/\\/g, '/').lastIndexOf('/'))
+    let resolvedPath: string
+
+    if (href.startsWith('/') || /^[a-zA-Z]:/.test(href)) {
+      // 绝对路径
+      resolvedPath = href
+    } else {
+      // 相对路径：基于当前文件目录解析
+      const dir = currentDir
+      const parts = href.split('/')
+      const pathParts = dir.split('/')
+      for (const part of parts) {
+        if (part === '..') {
+          pathParts.pop()
+        } else if (part !== '.') {
+          pathParts.push(part)
+        }
+      }
+      resolvedPath = pathParts.join('/')
+    }
+
+    // 提取文件名（解码后的）
+    const linkFileName = resolvedPath.split('/').pop() || href
+    // 导航到外部文件预览页面
+    router.push({
+      path: '/external-preview',
+      query: { path: resolvedPath, name: linkFileName }
+    })
+  } else {
+    // 外部链接：用系统浏览器打开
+    window.open(anchor.href, '_blank')
+  }
+}
+
+onMounted(() => {
+  markdownBodyRef.value?.addEventListener('click', handleMarkdownLinkClick)
+})
+
+onUnmounted(() => {
+  markdownBodyRef.value?.removeEventListener('click', handleMarkdownLinkClick)
+})
+
+watch(markdownBodyRef, (newRef, oldRef) => {
+  oldRef?.removeEventListener('click', handleMarkdownLinkClick)
+  newRef?.addEventListener('click', handleMarkdownLinkClick)
+})
 
 // 加载文件内容的核心逻辑
 async function loadFile(path: string, name: string) {
@@ -37,7 +111,10 @@ async function loadFile(path: string, name: string) {
   if (imageExts.includes(ext)) {
     fileType.value = 'image'
     await loadImage(path)
-  } else if (['txt', 'md', 'js', 'ts', 'json', 'html', 'css', 'xml', 'yaml', 'yml', 'toml', 'ini', 'cfg', 'log', 'py', 'java', 'c', 'cpp', 'h', 'go', 'rs', 'sql', 'sh', 'bat', 'ps1', 'vue', 'jsx', 'tsx', 'scss', 'less', 'graphql', 'dockerfile', 'makefile'].includes(ext)) {
+  } else if (ext === 'md' || ext === 'markdown') {
+    fileType.value = 'markdown'
+    await loadTextFile(path)
+  } else if (['txt', 'js', 'ts', 'json', 'html', 'css', 'xml', 'yaml', 'yml', 'toml', 'ini', 'cfg', 'log', 'py', 'java', 'c', 'cpp', 'h', 'go', 'rs', 'sql', 'sh', 'bat', 'ps1', 'vue', 'jsx', 'tsx', 'scss', 'less', 'graphql', 'dockerfile', 'makefile'].includes(ext)) {
     fileType.value = 'text'
     await loadTextFile(path)
   } else {
@@ -201,17 +278,67 @@ async function openWithSystem() {
     ElMessage.error('打开文件失败')
   }
 }
+
+// Ctrl+S 快速保存（不弹确认框）
+async function quickSave() {
+  if (!isEditing.value || !isModified.value) return
+  loading.value = true
+  try {
+    const encoder = new TextEncoder()
+    const bytes = encoder.encode(fileContent.value)
+    let binary = ''
+    for (let i = 0; i < bytes.length; i++) {
+      binary += String.fromCharCode(bytes[i])
+    }
+    const base64 = btoa(binary)
+    const saveResult = await window.api.saveExternalFile(filePath.value, base64)
+    if (saveResult.success) {
+      ElMessage.success('文件保存成功')
+      originalContent.value = fileContent.value
+      isModified.value = false
+    } else {
+      ElMessage.error(`保存失败: ${saveResult.error}`)
+    }
+  } catch (error) {
+    console.error('保存文件失败:', error)
+    ElMessage.error('保存文件失败')
+  } finally {
+    loading.value = false
+  }
+}
+
+function handleKeyDown(event: KeyboardEvent) {
+  if ((event.ctrlKey || event.metaKey) && event.key === 's') {
+    event.preventDefault()
+    if (isEditing.value && isModified.value) {
+      quickSave()
+    }
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('keydown', handleKeyDown)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleKeyDown)
+})
 </script>
 
 <template>
   <div class="external-file-preview">
     <div class="preview-header">
       <h2>{{ fileName }}</h2>
-      <el-tag size="small">{{ fileType === 'image' ? '图片' : fileType === 'text' ? '文本' : '其他' }}</el-tag>
+      <el-tag size="small">{{ fileType === 'image' ? '图片' : fileType === 'markdown' ? 'Markdown' : fileType === 'text' ? '文本' : '其他' }}</el-tag>
       <el-tag v-if="isModified" size="small" type="warning">未保存</el-tag>
       
-      <!-- 文本文件的操作按钮 -->
-      <template v-if="fileType === 'text'">
+      <!-- 文本/Markdown文件的操作按钮 -->
+      <template v-if="fileType === 'text' || fileType === 'markdown'">
+        <!-- Markdown 预览/源码切换 -->
+        <el-button-group v-if="fileType === 'markdown' && !isEditing" size="small">
+          <el-button :type="mdViewMode === 'render' ? 'primary' : ''" @click="mdViewMode = 'render'">渲染</el-button>
+          <el-button :type="mdViewMode === 'source' ? 'primary' : ''" @click="mdViewMode = 'source'">源码</el-button>
+        </el-button-group>
         <el-button 
           v-if="!isEditing" 
           size="small" 
@@ -249,6 +376,21 @@ async function openWithSystem() {
     <div v-else-if="fileType === 'image'" class="image-preview">
       <img v-if="imageUrl" :src="imageUrl" :alt="fileName" class="preview-image" />
       <el-empty v-else description="无法加载图片" />
+    </div>
+    
+    <div v-else-if="fileType === 'markdown'" class="markdown-preview">
+      <!-- 编辑模式 -->
+      <textarea 
+        v-if="isEditing"
+        v-model="fileContent"
+        class="text-editor"
+        @input="onContentChange"
+        spellcheck="false"
+      ></textarea>
+      <!-- 渲染模式 -->
+      <div v-else-if="mdViewMode === 'render'" ref="markdownBodyRef" class="markdown-body" v-html="renderedMarkdown"></div>
+      <!-- 源码模式 -->
+      <pre v-else class="text-content">{{ fileContent }}</pre>
     </div>
     
     <div v-else-if="fileType === 'text'" class="text-preview">
@@ -359,4 +501,59 @@ async function openWithSystem() {
 .other-preview {
   padding: 60px 20px;
 }
+
+.markdown-preview {
+  background: var(--bg-secondary);
+  border-radius: 8px;
+  padding: 24px;
+  overflow: auto;
+  max-height: calc(100vh - 200px);
+}
+
+.markdown-body {
+  line-height: 1.7;
+  color: var(--text-primary);
+}
+
+.markdown-body :deep(h1) { font-size: 28px; margin: 16px 0 8px; font-weight: 700; border-bottom: 1px solid var(--border-color); padding-bottom: 8px; }
+.markdown-body :deep(h2) { font-size: 22px; margin: 16px 0 8px; font-weight: 600; border-bottom: 1px solid var(--border-color); padding-bottom: 6px; }
+.markdown-body :deep(h3) { font-size: 18px; margin: 12px 0 6px; font-weight: 600; }
+.markdown-body :deep(h4) { font-size: 16px; margin: 12px 0 6px; font-weight: 600; }
+.markdown-body :deep(p) { margin: 8px 0; }
+.markdown-body :deep(pre) {
+  background: #1e1e1e;
+  border-radius: 6px;
+  padding: 16px;
+  overflow-x: auto;
+  margin: 12px 0;
+}
+.markdown-body :deep(pre code) {
+  font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #d4d4d4;
+}
+.markdown-body :deep(code) {
+  font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 13px;
+  background: rgba(127, 127, 127, 0.15);
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+.markdown-body :deep(blockquote) {
+  border-left: 3px solid var(--accent-color);
+  padding-left: 16px;
+  margin: 12px 0;
+  color: var(--text-secondary);
+}
+.markdown-body :deep(ul), .markdown-body :deep(ol) { padding-left: 24px; margin: 8px 0; }
+.markdown-body :deep(li) { margin: 4px 0; }
+.markdown-body :deep(table) { border-collapse: collapse; width: 100%; margin: 12px 0; }
+.markdown-body :deep(th), .markdown-body :deep(td) { border: 1px solid var(--border-color); padding: 8px 12px; text-align: left; }
+.markdown-body :deep(th) { background: var(--bg-secondary); font-weight: 600; }
+.markdown-body :deep(a) { color: var(--accent-color); text-decoration: none; }
+.markdown-body :deep(a:hover) { text-decoration: underline; }
+.markdown-body :deep(img) { max-width: 100%; border-radius: 8px; margin: 8px 0; }
+.markdown-body :deep(hr) { border: none; border-top: 1px solid var(--border-color); margin: 16px 0; }
+.markdown-body :deep(input[type="checkbox"]) { margin-right: 6px; }
 </style>

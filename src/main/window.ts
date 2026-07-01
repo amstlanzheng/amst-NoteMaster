@@ -11,11 +11,17 @@ export function createMainWindow(): BrowserWindow {
       try {
         const url = request.url.replace(/^amnote:\/\//, '')
         const decodedUrl = decodeURIComponent(url)
-        // amnote://files/xxx.png -> {userData}/amnote-data/files/xxx.png
-        const filePath = join(app.getPath('userData'), 'amnote-data', decodedUrl)
-        console.log('[Protocol] Request:', request.url)
-        console.log('[Protocol] Mapped to:', filePath)
-        console.log('[Protocol] Exists:', existsSync(filePath))
+        
+        let filePath: string
+        if (decodedUrl.startsWith('local/')) {
+          // amnote://local/D:/book/images/xxx.png -> D:/book/images/xxx.png
+          // 用于外部文件预览中的相对路径图片
+          filePath = decodedUrl.replace(/^local\//, '')
+        } else {
+          // amnote://files/xxx.png -> {userData}/amnote-data/files/xxx.png
+          filePath = join(app.getPath('userData'), 'amnote-data', decodedUrl)
+        }
+        
         callback({ path: filePath })
       } catch (error) {
         console.error('[Protocol] Error:', error)

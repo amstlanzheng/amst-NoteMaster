@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ref, watch, computed, nextTick } from 'vue'
+import { ref, watch, computed, nextTick, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Picture, Delete, Close, View } from '@element-plus/icons-vue'
+import { useRouter } from 'vue-router'
 import { useNoteStore } from '../../stores/note'
 import { useTagStore } from '../../stores/tag'
 import { renderMarkdown } from '../../utils/markdown'
@@ -9,6 +10,7 @@ import type { Tag } from '@shared/types'
 
 const noteStore = useNoteStore()
 const tagStore = useTagStore()
+const router = useRouter()
 
 const editTitle = ref('')
 const editContent = ref('')
@@ -280,6 +282,68 @@ function showTagDialog() {
   tagDialogVisible.value = true
 }
 
+// 拦截预览面板中的链接点击
+// .md/.markdown 文件链接在应用内跳转预览，其他链接用外部浏览器打开
+function handlePreviewClick(event: MouseEvent) {
+  const target = event.target as HTMLElement
+  const anchor = target.closest('a') as HTMLAnchorElement | null
+  if (!anchor || !anchor.href) return
+
+  event.preventDefault()
+  // markdown-it 会对 href 进行 URL 编码（如中文变为 %XX），需要解码
+  const href = decodeURIComponent(anchor.getAttribute('href') || '')
+
+  // 判断是否为 .md/.markdown 文件链接
+  const mdExtRegex = /\.(md|markdown)$/i
+  if (mdExtRegex.test(href)) {
+    // 提取文件名（解码后的）
+    const linkFileName = href.split('/').pop() || href
+    // 导航到外部文件预览页面
+    router.push({
+      path: '/external-preview',
+      query: { path: href, name: linkFileName }
+    })
+  } else {
+    // 外部链接：用系统浏览器打开
+    window.open(anchor.href, '_blank')
+  }
+}
+
+onMounted(() => {
+  previewPaneRef.value?.addEventListener('click', handlePreviewClick)
+})
+
+onUnmounted(() => {
+  previewPaneRef.value?.removeEventListener('click', handlePreviewClick)
+})
+
+// 监听预览面板 ref 变化，重新绑定事件
+watch(previewPaneRef, (newRef, oldRef) => {
+  oldRef?.removeEventListener('click', handlePreviewClick)
+  newRef?.addEventListener('click', handlePreviewClick)
+})
+
+// Ctrl+S 立即保存
+function handleKeyDown(event: KeyboardEvent) {
+  if ((event.ctrlKey || event.metaKey) && event.key === 's') {
+    event.preventDefault()
+    if (autoSaveTimer.value) {
+      clearTimeout(autoSaveTimer.value)
+      autoSaveTimer.value = null
+    }
+    doAutoSave()
+    ElMessage.success('已保存')
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('keydown', handleKeyDown)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleKeyDown)
+})
+
 async function handlePasteImage(event: ClipboardEvent) {
   const items = event.clipboardData?.items
   if (!items) return
@@ -301,6 +365,10 @@ async function handlePasteImage(event: ClipboardEvent) {
       const storageMode = localStorage.getItem('amnote-image-storage-mode') || 'base64'
       
       try {
+        // 获取光标位置（在异步操作前保存，避免丢失）
+        const textarea = document.querySelector('.edit-textarea') as HTMLTextAreaElement
+        const cursorPos = textarea ? textarea.selectionStart : editContent.value.length
+
         if (storageMode === 'folder') {
           // 文件夹存储模式：保存图片到本地并返回路径
           const arrayBuffer = await blob.arrayBuffer()
@@ -316,14 +384,14 @@ async function handlePasteImage(event: ClipboardEvent) {
           }
           
           const mdImg = `\n![](${result.path})\n`
-          editContent.value += mdImg
+          insertAtCursor(mdImg, cursorPos)
           triggerAutoSave()
           ElMessage.success('图片已插入（文件夹存储）')
         } else {
           // Base64 存储模式：直接嵌入
           const base64 = await fileToBase64(blob)
           const mdImg = `\n![](${base64})\n`
-          editContent.value += mdImg
+          insertAtCursor(mdImg, cursorPos)
           triggerAutoSave()
           ElMessage.success('图片已插入（Base64 格式）')
         }
@@ -334,6 +402,21 @@ async function handlePasteImage(event: ClipboardEvent) {
       break
     }
   }
+}
+
+// 在指定位置插入文本
+function insertAtCursor(text: string, pos: number) {
+  const content = editContent.value
+  editContent.value = content.slice(0, pos) + text + content.slice(pos)
+  // 恢复光标位置到插入文本之后
+  nextTick(() => {
+    const textarea = document.querySelector('.edit-textarea') as HTMLTextAreaElement
+    if (textarea) {
+      const newPos = pos + text.length
+      textarea.selectionStart = textarea.selectionEnd = newPos
+      textarea.focus()
+    }
+  })
 }
 
 // 将 File/Blob 转换为 Base64

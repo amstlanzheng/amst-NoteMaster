@@ -1,18 +1,22 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { useNoteStore } from '../stores/note'
 import { formatRelative, stripMarkdown, truncate } from '../utils/format'
 import type { Note } from '@shared/types'
 
 const noteStore = useNoteStore()
+const router = useRouter()
 const favNotes = ref<Note[]>([])
 
 async function loadFavorites() {
   favNotes.value = await window.api.getNotes({ is_favorite: true })
 }
 
-function selectNote(note: Note) {
+async function selectNote(note: Note) {
   noteStore.currentNote = note
+  noteStore.clearFilters()
+  await router.push('/')
 }
 
 onMounted(loadFavorites)

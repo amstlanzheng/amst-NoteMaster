@@ -14,30 +14,20 @@
       transition: opacity 0.4s ease;
     }
     #splash.hidden { opacity: 0; pointer-events: none; }
-    #splash .logo { width: 64px; height: 64px; background: #0078d4; border-radius: 16px;
-      display: flex; align-items: center; justify-content: center; margin-bottom: 20px;
-      box-shadow: 0 8px 24px rgba(0,120,212,0.3); }
-    #splash .logo svg { width: 36px; height: 36px; fill: #fff; }
-    #splash .title { font-size: 26px; font-weight: 700; color: #1a1a2e; margin-bottom: 6px; }
-    #splash .subtitle { font-size: 13px; color: #666; margin-bottom: 36px; max-width: 260px; text-align: center; line-height: 1.6; }
-    #splash .btn-start {
-      padding: 10px 40px; font-size: 15px; font-weight: 600;
-      color: #fff; background: #0078d4; border: none; border-radius: 8px;
-      cursor: pointer; transition: all 0.2s; outline: none;
-      box-shadow: 0 4px 12px rgba(0,120,212,0.35);
-    }
-    #splash .btn-start:hover { background: #0066b8; transform: translateY(-1px); box-shadow: 0 6px 16px rgba(0,120,212,0.4); }
-    #splash .btn-start:active { transform: translateY(0); }
-    #splash .loading { display: none; flex-direction: column; align-items: center; gap: 18px; }
-    #splash .loading.show { display: flex; }
-    #splash .welcome { display: flex; flex-direction: column; align-items: center; }
-    #splash .welcome.hidden { display: none; }
+    #splash .logo { width: 72px; height: 72px; background: #0078d4; border-radius: 18px;
+      display: flex; align-items: center; justify-content: center; margin-bottom: 24px;
+      box-shadow: 0 8px 28px rgba(0,120,212,0.35); animation: logoPulse 2s ease-in-out infinite; }
+    #splash .logo svg { width: 40px; height: 40px; fill: #fff; }
+    #splash .title { font-size: 28px; font-weight: 700; color: #1a1a2e; margin-bottom: 8px; }
+    #splash .subtitle { font-size: 13px; color: #666; margin-bottom: 32px; max-width: 280px; text-align: center; line-height: 1.6; }
+    #splash .loading-area { display: flex; flex-direction: column; align-items: center; gap: 16px; }
     #splash .spinner {
-      width: 36px; height: 36px; border: 3px solid #ddd;
-      border-top-color: #0078d4; border-radius: 50%; animation: spin 0.7s linear infinite;
+      width: 32px; height: 32px; border: 3px solid #e0e0e0;
+      border-top-color: #0078d4; border-radius: 50%; animation: spin 0.8s linear infinite;
     }
-    #splash .load-text { font-size: 13px; color: #888; }
-    #splash .version { font-size: 11px; color: #bbb; margin-top: 40px; }
+    #splash .load-text { font-size: 13px; color: #888; min-height: 20px; transition: opacity 0.3s; }
+    #splash .version { font-size: 11px; color: #bbb; margin-top: 48px; }
+    @keyframes logoPulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.05); } }
     @keyframes spin { to { transform: rotate(360deg); } }
     @media (prefers-color-scheme: dark) {
       #splash { background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); }
@@ -45,37 +35,42 @@
       #splash .subtitle { color: #999; }
       #splash .spinner { border-color: #333; border-top-color: #60cdff; }
       #splash .load-text { color: #777; }
+      #splash .logo { background: #0078d4; box-shadow: 0 8px 28px rgba(0,120,212,0.25); }
     }
   </style>
 </head>
 <body>
   <div id="splash">
-    <div class="welcome" id="welcome">
-      <div class="logo">
-        <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm-1 2l5 5h-5V4zM8 13h8v2H8v-2zm0 4h8v2H8v-2zm0-8h3v2H8V9z"/></svg>
-      </div>
-      <div class="title">AmNote</div>
-      <div class="subtitle">AI-powered personal knowledge management platform</div>
-      <button class="btn-start" id="btn-start">Get Started</button>
-      <div class="version">v1.0.0</div>
+    <div class="logo">
+      <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm-1 2l5 5h-5V4zM8 13h8v2H8v-2zm0 4h8v2H8v-2zm0-8h3v2H8V9z"/></svg>
     </div>
-    <div class="loading" id="loading">
+    <div class="title">AmNote</div>
+    <div class="subtitle">AI 驱动的个人知识管理平台</div>
+    <div class="loading-area">
       <div class="spinner"></div>
-      <div class="load-text">Loading your workspace...</div>
+      <div class="load-text" id="load-text">正在加载工作区...</div>
     </div>
+    <div class="version">v1.02</div>
   </div>
   <div id="app"></div>
   <script>
-    document.getElementById('btn-start').addEventListener('click', function() {
-      document.getElementById('welcome').classList.add('hidden');
-      document.getElementById('loading').classList.add('show');
-    });
+    var loadTexts = ['正在加载工作区...', '正在初始化数据库...', '正在准备界面...'];
+    var loadIdx = 0;
+    var loadTimer = setInterval(function() {
+      loadIdx++;
+      if (loadIdx < loadTexts.length) {
+        document.getElementById('load-text').textContent = loadTexts[loadIdx];
+      } else {
+        clearInterval(loadTimer);
+      }
+    }, 1500);
     window.addEventListener('DOMContentLoaded', function() {
       var obs = new MutationObserver(function() {
         if (document.querySelector('#app > div')) {
+          clearInterval(loadTimer);
           var el = document.getElementById('splash');
           el.classList.add('hidden');
-          setTimeout(function() { el.remove(); }, 450);
+          setTimeout(function() { el.remove(); }, 500);
           obs.disconnect();
         }
       });

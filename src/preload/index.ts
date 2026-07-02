@@ -84,6 +84,21 @@ const api = {
     return () => ipcRenderer.removeListener('global-search', callback)
   },
 
+  onMenuOpenFolder: (callback: () => void) => {
+    ipcRenderer.on('menu-open-folder', callback)
+    return () => ipcRenderer.removeListener('menu-open-folder', callback)
+  },
+
+  onMenuOpenFile: (callback: () => void) => {
+    ipcRenderer.on('menu-open-file', callback)
+    return () => ipcRenderer.removeListener('menu-open-file', callback)
+  },
+
+  onMenuViewStats: (callback: () => void) => {
+    ipcRenderer.on('menu-view-stats', callback)
+    return () => ipcRenderer.removeListener('menu-view-stats', callback)
+  },
+
   onExportProgress: (callback: (data: { current: number; total: number; status: string }) => void) => {
     ipcRenderer.on('export-progress', (_event, data) => callback(data))
     return () => ipcRenderer.removeListener('export-progress', callback as any)

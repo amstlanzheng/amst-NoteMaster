@@ -1,5 +1,5 @@
 import { app, globalShortcut, Tray, Menu, nativeImage, NativeImage } from 'electron'
-import { getMainWindow, createMainWindow } from './window'
+import { getMainWindow, createMainWindow, createSplashWindow, closeSplashWindow } from './window'
 import { registerIpcHandlers } from './ipc'
 import { initDatabase, flushSaveDb } from './database'
 import { join } from 'path'
@@ -241,6 +241,9 @@ function createTray() {
 }
 
 app.whenReady().then(async () => {
+  // 立即显示 splash 窗口，让用户知道程序已启动
+  createSplashWindow()
+
   await initDatabase()
   registerIpcHandlers()
   createAppMenu()
@@ -251,9 +254,11 @@ app.whenReady().then(async () => {
   
   mainWindow = createMainWindow()
   
-  // 等待窗口完全加载后再创建托盘，避免竞态条件
+  // 主窗口准备好后关闭 splash
   mainWindow.once('ready-to-show', () => {
-    console.log('[App] Window ready, creating tray...')
+    console.log('[App] Window ready, closing splash and creating tray...')
+    closeSplashWindow()
+    mainWindow?.show()
     createTray()
   })
 

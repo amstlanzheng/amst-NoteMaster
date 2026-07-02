@@ -63,19 +63,21 @@
       } else {
         clearInterval(loadTimer);
       }
-    }, 1500);
-    window.addEventListener('DOMContentLoaded', function() {
-      var obs = new MutationObserver(function() {
-        if (document.querySelector('#app > div')) {
-          clearInterval(loadTimer);
-          var el = document.getElementById('splash');
+    }, 1200);
+    // 由 Vue 应用在数据加载完成后调用
+    window.__appReady = function() {
+      clearInterval(loadTimer);
+      var el = document.getElementById('splash');
+      if (el) {
+        document.getElementById('load-text').textContent = '就绪';
+        setTimeout(function() {
           el.classList.add('hidden');
           setTimeout(function() { el.remove(); }, 500);
-          obs.disconnect();
-        }
-      });
-      obs.observe(document.getElementById('app'), { childList: true, subtree: true });
-    });
+        }, 300);
+      }
+    };
+    // 安全兜底：如果 8 秒后 Vue 仍未调用，强制隐藏
+    setTimeout(function() { window.__appReady && window.__appReady(); }, 8000);
   </script>
   <script type="module" src="./main.ts"></script>
 </body>

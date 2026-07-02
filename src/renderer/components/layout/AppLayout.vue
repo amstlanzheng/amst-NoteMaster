@@ -19,6 +19,10 @@ onMounted(async () => {
     tagStore.fetchTags(),
     searchStore.fetchHistory()
   ])
+  // 通知 splash 屏幕数据已加载，可以隐藏
+  if ((window as any).__appReady) {
+    ;(window as any).__appReady()
+  }
 })
 </script>
 

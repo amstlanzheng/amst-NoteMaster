@@ -22,17 +22,40 @@ const emit = defineEmits<{
   (e: 'cat-drop', event: DragEvent, catId: number): void
 }>()
 
-// 展开状态（默认展开）
-const isExpanded = ref(true)
+// 展开状态 - 从 localStorage 恢复，默认展开
+const STORAGE_KEY = 'amnote-category-expanded'
+function getSavedExpandedIds(): Set<number> {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY)
+    if (saved) return new Set(JSON.parse(saved))
+  } catch {}
+  return new Set()
+}
+
+const isExpanded = ref(!getSavedExpandedIds().has(props.category.id))
 
 // 是否有子节点
 const hasChildren = computed(() => props.category.children && props.category.children.length > 0)
+
+// 保存展开状态到 localStorage
+function saveExpandedState() {
+  const ids = getSavedExpandedIds()
+  if (isExpanded.value) {
+    ids.delete(props.category.id)
+  } else {
+    ids.add(props.category.id)
+  }
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify([...ids]))
+  } catch {}
+}
 
 // 切换展开状态
 function toggleExpand(event: Event) {
   event.stopPropagation()
   if (hasChildren.value) {
     isExpanded.value = !isExpanded.value
+    saveExpandedState()
   }
 }
 

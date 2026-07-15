@@ -4,6 +4,19 @@
 
 ## 文档导航
 
+### v1.03 变更文档（2026-07-03）
+
+```
+doc/v1.03/
+├── 01-splash-optimization.md           # 启动过渡窗口优化（移除独立splash，HTML内嵌）
+├── 02-note-list-features.md            # 笔记列表搜索与摘要/列表视图切换
+├── 03-navigation-history.md            # 返回上级分类与上一个笔记导航
+├── 04-note-list-ui-optimization.md     # 列表栏布局优化（图标化、间距调整）
+├── 05-sidebar-optimization.md          # 侧边栏优化（图标菜单、移除拖拽、可折叠面板）
+├── 06-minio-storage.md                 # MinIO 对象存储支持
+└── 07-splash-theme.md                  # 启动页白厄风格黄紫配色
+```
+
 ### v1.02 变更文档（2026-07-01）
 
 ```

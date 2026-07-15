@@ -13,6 +13,18 @@ const tagStore = useTagStore()
 const searchStore = useSearchStore()
 
 onMounted(async () => {
+  // 等待主进程数据库初始化完成后再加载数据
+  const api = (window as any).api
+  if (api?.isDbReady) {
+    const ready = await api.isDbReady()
+    if (!ready) {
+      await new Promise<void>((resolve) => {
+        const off = api.onDbReady(() => { off(); resolve() })
+        setTimeout(() => { off(); resolve() }, 5000)
+      })
+    }
+  }
+
   await Promise.all([
     noteStore.fetchNotes(),
     categoryStore.fetchCategories(),

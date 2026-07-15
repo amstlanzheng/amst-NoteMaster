@@ -64,14 +64,7 @@ const showExternalFiles = ref(true) // 默认展开
 const fileTreeRef = ref<any>(null) // 树组件引用
 const currentViewingPath = ref<string>('') // 当前查看的文件夹路径
 
-// 布局调整相关
-const menuHeight = ref<number>(0.35) // 顶部菜单区域占比 (0.2-0.5)
-const bottomHeight = ref<number>(0.25) // 底部区域占比 (0.15-0.4)
-const isResizing = ref(false)
-const resizeStartY = ref(0)
-const resizeStartMenuHeight = ref(0)
-const resizeStartBottomHeight = ref(0)
-const resizeType = ref<'menu' | 'bottom'>('menu') // 正在调整哪个分隔条
+// 布局调整相关 - 已移除拖拽调整，改为固定布局 + 底部可折叠
 
 const menuItems = [
   { path: '/', name: 'home', icon: 'Document', label: '全部笔记' },
@@ -798,89 +791,6 @@ async function openExternalFile(filePath: string) {
   }
 }
 
-// 开始调整顶部菜单区域高度
-function startResizeMenu(event: MouseEvent) {
-  event.preventDefault()
-  isResizing.value = true
-  resizeType.value = 'menu'
-  resizeStartY.value = event.clientY
-  resizeStartMenuHeight.value = menuHeight.value
-  
-  document.addEventListener('mousemove', handleResize)
-  document.addEventListener('mouseup', stopResize)
-}
-
-// 开始调整底部区域高度
-function startResizeBottom(event: MouseEvent) {
-  event.preventDefault()
-  isResizing.value = true
-  resizeType.value = 'bottom'
-  resizeStartY.value = event.clientY
-  resizeStartBottomHeight.value = bottomHeight.value
-  
-  document.addEventListener('mousemove', handleResize)
-  document.addEventListener('mouseup', stopResize)
-}
-
-// 处理拖拽调整
-function handleResize(event: MouseEvent) {
-  if (!isResizing.value) return
-  
-  const sidebarElement = document.querySelector('.sidebar') as HTMLElement
-  if (!sidebarElement) return
-  
-  const sidebarHeight = sidebarElement.clientHeight
-  const deltaY = event.clientY - resizeStartY.value
-  const deltaRatio = deltaY / sidebarHeight
-  
-  if (resizeType.value === 'menu') {
-    // 调整顶部菜单区域
-    const newMenuHeight = resizeStartMenuHeight.value + deltaRatio
-    menuHeight.value = Math.max(0.2, Math.min(0.5, newMenuHeight))
-  } else {
-    // 调整底部区域（外部文件）
-    const newBottomHeight = resizeStartBottomHeight.value - deltaRatio
-    bottomHeight.value = Math.max(0.15, Math.min(0.4, newBottomHeight))
-  }
-}
-
-// 停止调整
-function stopResize() {
-  isResizing.value = false
-  document.removeEventListener('mousemove', handleResize)
-  document.removeEventListener('mouseup', stopResize)
-  
-  // 保存布局到 localStorage
-  saveLayout()
-}
-
-// 保存布局
-function saveLayout() {
-  try {
-    localStorage.setItem('sidebar-menu-height', String(menuHeight.value))
-    localStorage.setItem('sidebar-bottom-height', String(bottomHeight.value))
-  } catch (error) {
-    console.error('保存布局失败:', error)
-  }
-}
-
-// 加载布局
-function loadLayout() {
-  try {
-    const savedMenuHeight = localStorage.getItem('sidebar-menu-height')
-    const savedBottomHeight = localStorage.getItem('sidebar-bottom-height')
-    
-    if (savedMenuHeight) {
-      menuHeight.value = parseFloat(savedMenuHeight)
-    }
-    if (savedBottomHeight) {
-      bottomHeight.value = parseFloat(savedBottomHeight)
-    }
-  } catch (error) {
-    console.error('加载布局失败:', error)
-  }
-}
-
 // 预览外部文件（在右侧内容栏显示）
 function previewExternalFile(file: {
   id: number
@@ -915,48 +825,44 @@ function collapseAllDirs() {
   fileTreeRef.value?.collapseAll()
 }
 
+// 新建外部文件夹/文件（调用树组件的方法）
+function newExternalFolder() {
+  fileTreeRef.value?.toolbarNewFolder()
+}
+
+function newExternalFile() {
+  fileTreeRef.value?.toolbarNewFile()
+}
+
 const isActive = (path: string) => route.path === path
 </script>
 
 <template>
   <div class="sidebar">
-    <!-- 顶部固定区域 -->
-    <div class="sidebar-top-fixed" :style="{ height: menuHeight * 100 + '%' }">
-      <el-scrollbar class="sidebar-top-scroll">
-        <div class="sidebar-header">
-          <h2 class="app-title">AmNote</h2>
-          <el-button :icon="uiStore.isDarkMode ? 'Sunny' : 'Moon'" circle size="small" @click="uiStore.toggleDarkMode()" />
-        </div>
+    <!-- 顶部固定区域：标题 + 搜索 + 图标菜单 -->
+    <div class="sidebar-top-fixed">
+      <div class="sidebar-header">
+        <h2 class="app-title">AmNote</h2>
+        <el-button :icon="uiStore.isDarkMode ? 'Sunny' : 'Moon'" circle size="small" @click="uiStore.toggleDarkMode()" />
+      </div>
 
-        <div class="sidebar-search">
-          <el-input v-model="searchKeyword" placeholder="搜索..." size="small" clearable @keyup.enter="handleQuickSearch" @click="uiStore.openSearchDialog()">
-            <template #prefix><el-icon><Search /></el-icon></template>
-          </el-input>
-        </div>
+      <div class="sidebar-search">
+        <el-input v-model="searchKeyword" placeholder="搜索..." size="small" clearable @keyup.enter="handleQuickSearch" @click="uiStore.openSearchDialog()">
+          <template #prefix><el-icon><Search /></el-icon></template>
+        </el-input>
+      </div>
 
-        <!-- 固定菜单项 -->
-        <div class="fixed-menu">
-          <div v-for="item in menuItems" :key="item.path"
-            class="menu-item" :class="{ active: isActive(item.path) }"
-            @click="navigate(item.path)">
-            <el-icon><component :is="item.icon" /></el-icon>
-            <span>{{ item.label }}</span>
-          </div>
+      <!-- 紧凑图标菜单 -->
+      <div class="icon-menu">
+        <div v-for="item in menuItems" :key="item.path"
+          class="icon-menu-item" :class="{ active: isActive(item.path) }"
+          @click="navigate(item.path)" :title="item.label">
+          <el-icon><component :is="item.icon" /></el-icon>
         </div>
-      </el-scrollbar>
+      </div>
     </div>
 
-    <!-- 顶部菜单和中间区域的分隔条 -->
-    <div 
-      class="resize-handle resize-handle-top"
-      :class="{ 'resizing': isResizing && resizeType === 'menu' }"
-      @mousedown="startResizeMenu"
-      title="拖动调整顶部菜单区域高度"
-    >
-      <div class="resize-handle-bar"></div>
-    </div>
-
-    <!-- 中间可滚动区域（不包含外部文件） -->
+    <!-- 中间可滚动区域（分类 + 归档 + 标签） -->
     <el-scrollbar class="sidebar-scroll-content">
 
       <div v-if="categoryStore.favoriteCategories.length > 0" class="sidebar-section">
@@ -1048,34 +954,30 @@ const isActive = (path: string) => route.path === path
       </div>
     </el-scrollbar>
 
-    <!-- 中间和底部区域的分隔条 -->
-    <div 
-      class="resize-handle resize-handle-bottom"
-      :class="{ 'resizing': isResizing && resizeType === 'bottom' }"
-      @mousedown="startResizeBottom"
-      title="拖动调整底部区域高度"
-    >
-      <div class="resize-handle-bar"></div>
-    </div>
-
-    <!-- 底部固定外部区域（占1/4） -->
-    <div class="sidebar-bottom-fixed" :style="{ height: bottomHeight * 100 + '%' }">
-      <div class="external-files-section">
-        <div class="section-header" @click="showExternalFiles = !showExternalFiles">
-          <el-icon><component :is="showExternalFiles ? 'ArrowDown' : 'ArrowRight'" /></el-icon>
-          <span class="section-title">外部文件 ({{ externalFiles.length }})</span>
-          <div v-if="showExternalFiles && fileTree.length > 0" class="header-actions">
-            <el-button size="small" text @click.stop="expandAllDirs" title="全部展开">
+    <!-- 底部可折叠外部文件区域 -->
+    <div class="sidebar-bottom-panel">
+      <div class="panel-header" @click="showExternalFiles = !showExternalFiles">
+        <el-icon><component :is="showExternalFiles ? 'ArrowDown' : 'ArrowRight'" /></el-icon>
+        <span class="panel-title">外部文件 ({{ externalFiles.length }})</span>
+        <div v-if="showExternalFiles" class="header-actions" @click.stop>
+          <el-button size="small" text @click="newExternalFolder" title="新建文件夹">
+            <el-icon><FolderAdd /></el-icon>
+          </el-button>
+          <el-button size="small" text @click="newExternalFile" title="新建文件">
+            <el-icon><Document /></el-icon>
+          </el-button>
+          <template v-if="fileTree.length > 0">
+            <el-button size="small" text @click="expandAllDirs" title="全部展开">
               <el-icon><ArrowDown /></el-icon>
             </el-button>
-            <el-button size="small" text @click.stop="collapseAllDirs" title="全部收起">
+            <el-button size="small" text @click="collapseAllDirs" title="全部收起">
               <el-icon><ArrowRight /></el-icon>
             </el-button>
-          </div>
-
+          </template>
         </div>
-        
-        <el-scrollbar v-if="showExternalFiles" class="external-files-list">
+      </div>
+      
+      <el-scrollbar v-if="showExternalFiles" class="external-files-list">
           <!-- 使用树形组件显示 -->
           <ExternalFileTree
             ref="fileTreeRef"
@@ -1083,13 +985,13 @@ const isActive = (path: string) => route.path === path
             @preview="previewExternalFile"
             @open="openExternalFile"
             @dragstart="handleExternalFileDragStart"
+            @refresh="loadExternalFiles"
           />
           
           <div v-if="fileTree.length === 0" class="empty-external-files">
             <el-empty description="暂无外部文件" :image-size="60" />
           </div>
         </el-scrollbar>
-      </div>
     </div>
 
     <Teleport to="body">
@@ -1138,67 +1040,114 @@ const isActive = (path: string) => route.path === path
 /* 顶部固定区域 */
 .sidebar-top-fixed {
   flex-shrink: 0;
-  /* 边框由分隔条提供 */
-}
-
-/* 顶部滚动容器 */
-.sidebar-top-scroll {
-  height: 100%;
-  overflow-y: auto;
-}
-
-/* 自定义滚动条样式 */
-.sidebar-top-scroll :deep(.el-scrollbar__bar) {
-  opacity: 0.3;
-  transition: opacity 0.3s;
-}
-.sidebar-top-scroll:hover :deep(.el-scrollbar__bar) {
-  opacity: 1;
+  border-bottom: 1px solid var(--border-color);
 }
 
 .sidebar-header { 
   display: flex; 
   align-items: center; 
   justify-content: space-between; 
-  padding: 16px; 
+  padding: 12px 12px 8px; 
 }
 .app-title { 
-  font-size: 18px; 
+  font-size: 16px; 
   font-weight: 700; 
   color: var(--accent-color); 
   letter-spacing: 0.5px; 
 }
 .sidebar-search { 
-  padding: 8px 12px; 
+  padding: 0 12px 8px; 
 }
 
-/* 固定菜单 */
-.fixed-menu {
-  padding: 4px 8px;
-  border-bottom: 1px solid var(--border-color);
+/* 紧凑图标菜单 */
+.icon-menu {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 2px;
+  padding: 4px 8px 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.icon-menu::-webkit-scrollbar { display: none; }
+.icon-menu { -ms-overflow-style: none; scrollbar-width: none; }
+.icon-menu-item {
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--text-secondary);
+  transition: all 0.15s ease;
+  font-size: 16px;
+}
+.icon-menu-item:hover { 
+  background: var(--hover-bg); 
+  color: var(--text-primary); 
+}
+.icon-menu-item.active { 
+  background: var(--active-bg); 
+  color: var(--accent-color); 
 }
 
 /* 中间可滚动区域 */
 .sidebar-scroll-content {
-  flex: 1; /* 自动填充剩余空间 */
-  min-height: 0;
-  overflow: hidden;
-}
-
-/* 底部固定外部文件区域 */
-.sidebar-bottom-fixed {
-  flex-shrink: 0;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  /* 边框由分隔条提供 */
-}
-
-.sidebar-bottom-fixed .external-files-section {
   flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* 底部可折叠面板 */
+.sidebar-bottom-panel {
+  flex-shrink: 0;
+  max-height: 40%;
   display: flex;
   flex-direction: column;
+  border-top: 1px solid var(--border-color);
+}
+.panel-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 12px;
+  cursor: pointer;
+  user-select: none;
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+.panel-header:hover {
+  background: var(--hover-bg);
+}
+.panel-title {
+  flex: 1;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  letter-spacing: 0.5px;
+  white-space: nowrap;
   overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.panel-header .header-actions {
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.panel-header .header-actions .el-button {
+  padding: 4px !important;
+}
+.panel-header .header-actions .el-icon {
+  font-size: 14px;
+}
+.sidebar-bottom-panel .external-files-list {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0 8px;
 }
 .menu-item { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 6px; cursor: pointer; color: var(--text-secondary); transition: all 0.15s ease; font-size: 13px; }
 .menu-item:hover { background: var(--hover-bg); color: var(--text-primary); }
@@ -1220,72 +1169,11 @@ const isActive = (path: string) => route.path === path
 .sidebar-section { padding: 0 4px; }
 .add-cat-row { display: flex; gap: 4px; padding: 4px 12px 8px; align-items: center; }
 
-/* 拖拽分隔条样式 */
-.resize-handle {
-  height: 6px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: ns-resize;
-  transition: background 0.2s;
-  position: relative;
-  z-index: 10;
-}
-.resize-handle:hover {
-  background: rgba(0, 120, 212, 0.1);
-}
-.resize-handle.resizing {
-  background: rgba(0, 120, 212, 0.2);
-}
-.resize-handle-bar {
-  width: 40px;
-  height: 3px;
-  border-radius: 2px;
-  background: var(--border-color);
-  transition: background 0.2s;
-}
-.resize-handle:hover .resize-handle-bar {
-  background: var(--accent-color);
-}
-.resize-handle.resizing .resize-handle-bar {
-  background: var(--accent-color);
-}
-
 .add-cat-row .el-input { flex: 1; }
 .tag-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
 .tag-item { font-size: 12px; }
 
 /* 外部文件区域样式 */
-.sidebar-bottom-fixed .external-files-section {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.sidebar-bottom-fixed .section-header {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  cursor: pointer;
-  padding: 8px 12px;
-  user-select: none;
-  flex-shrink: 0;
-}
-.sidebar-bottom-fixed .section-header:hover {
-  background: var(--hover-bg);
-}
-.sidebar-bottom-fixed .header-actions {
-  margin-left: auto;
-  display: flex;
-  gap: 4px;
-}
-.sidebar-bottom-fixed .external-files-list {
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
-  padding: 0 8px;
-}
 
 /* 文件夹分组样式 */
 .file-group {

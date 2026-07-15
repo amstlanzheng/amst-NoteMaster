@@ -4,7 +4,10 @@ import { testSftpConnection, uploadAllToRemote, downloadAllFromRemote, setTempSf
 import { getMainWindow } from './window'
 import { join, basename, dirname } from 'path'
 import { writeFileSync, mkdirSync, existsSync, readFileSync, readdirSync, statSync, unlinkSync, copyFileSync } from 'fs'
-import type { Note, Category, Tag, NoteVersion, SearchHistory, FilterOptions, SftpConfig } from '../shared/types'
+import type { Note, Category, Tag, NoteVersion, SearchHistory, FilterOptions, SftpConfig, MinioConfig } from '../shared/types'
+
+let dbReady = false
+export function markDbReady() { dbReady = true }
 
 // 简单的字符串哈希函数，用于生成临时 ID
 function hashCode(str: string): number {
@@ -17,7 +20,19 @@ function hashCode(str: string): number {
   return hash
 }
 
+// 递归收集分类及其所有子分类的 ID
+function collectSubCategoryIds(parentId: number): number[] {
+  const ids = [parentId]
+  const rows = getAll('SELECT id FROM categories WHERE parent_id = ?', [parentId]) as { id: number }[]
+  for (const row of rows) {
+    ids.push(...collectSubCategoryIds(row.id))
+  }
+  return ids
+}
+
 function registerIpcHandlers() {
+  ipcMain.handle('db:is-ready', () => dbReady)
+
   ipcMain.handle('db:get-notes', (_event, filters?: FilterOptions) => {
     let sql = 'SELECT n.* FROM notes n WHERE n.is_deleted = 0'
     const params: any[] = []
@@ -26,6 +41,12 @@ function registerIpcHandlers() {
       if (filters.category_id !== undefined) {
         if (filters.category_id === null) {
           sql += ' AND n.category_id IS NULL'
+        } else if (filters.include_subcategories) {
+          // 包含子分类：收集当前分类及所有子分类的 ID
+          const allIds = collectSubCategoryIds(filters.category_id)
+          const placeholders = allIds.map(() => '?').join(',')
+          sql += ` AND n.category_id IN (${placeholders})`
+          params.push(...allIds)
         } else {
           // 只显示当前分类的直接笔记（不含子分类）
           sql += ' AND n.category_id = ?'
@@ -1435,6 +1456,85 @@ function formatFileSize(bytes: number): string {
     return result
   })
 
+  // MinIO 测试连接
+  ipcMain.handle('minio:test-connection', async (_event, config: MinioConfig) => {
+    try {
+      const Minio = require('minio')
+      const client = new Minio.Client({
+        endPoint: config.endPoint,
+        port: config.port,
+        accessKey: config.accessKey,
+        secretKey: config.secretKey,
+        useSSL: config.useSSL
+      })
+      // 检查 bucket 是否存在
+      const exists = await new Promise<boolean>((resolve, reject) => {
+        client.bucketExists(config.bucket, (err: any, result: boolean) => {
+          if (err) reject(err)
+          else resolve(result)
+        })
+      })
+      if (!exists) {
+        return { ok: false, message: `Bucket "${config.bucket}" 不存在` }
+      }
+      // 尝试列出对象验证权限
+      await new Promise<void>((resolve, reject) => {
+        const stream = client.listObjects(config.bucket, '', true)
+        stream.on('data', () => { resolve() }) // 只需读到一个即可
+        stream.on('end', () => { resolve() })
+        stream.on('error', (err: any) => { reject(err) })
+        // 超时保护
+        setTimeout(() => resolve(), 3000)
+      })
+      return { ok: true, message: '连接成功，Bucket 可访问' }
+    } catch (e: any) {
+      return { ok: false, message: `连接失败：${e.message || e}` }
+    }
+  })
+
+  // MinIO 上传文件
+  ipcMain.handle('minio:upload', async (_event, data: { buffer: number[]; filename: string; noteId: number; config: MinioConfig }) => {
+    try {
+      const config = data.config
+      const Minio = require('minio')
+      const client = new Minio.Client({
+        endPoint: config.endPoint,
+        port: config.port,
+        accessKey: config.accessKey,
+        secretKey: config.secretKey,
+        useSSL: config.useSSL
+      })
+
+      // 检查文件大小
+      const fileSize = data.buffer.length
+      const maxSize = 10 * 1024 * 1024 // MinIO 模式允许 10MB
+      if (fileSize > maxSize) {
+        return { path: '', error: `文件大小超过限制（最大10MB），当前大小：${(fileSize / 1024 / 1024).toFixed(2)}MB` }
+      }
+
+      const ext = data.filename.includes('.') ? data.filename.substring(data.filename.lastIndexOf('.')) : '.png'
+      const objectName = `${config.pathPrefix ? config.pathPrefix + '/' : ''}note_${data.noteId}_${Date.now()}${ext}`
+      const buffer = Buffer.from(data.buffer)
+
+      await new Promise<void>((resolve, reject) => {
+        client.putObject(config.bucket, objectName, buffer, buffer.length, {
+          'Content-Type': `image/${ext.replace('.', '')}`
+        }, (err: any) => {
+          if (err) reject(err)
+          else resolve()
+        })
+      })
+
+      // 返回 MinIO URL
+      const protocol = config.useSSL ? 'https' : 'http'
+      const portPart = (config.useSSL && config.port === 443) || (!config.useSSL && config.port === 80) ? '' : `:${config.port}`
+      const url = `${protocol}://${config.endPoint}${portPart}/${config.bucket}/${objectName}`
+      return { path: url }
+    } catch (e: any) {
+      return { path: '', error: `MinIO 上传失败：${e.message || e}` }
+    }
+  })
+
   // 退出应用
   ipcMain.on('app:quit', () => {
     app.quit()
@@ -1811,6 +1911,64 @@ function formatFileSize(bytes: number): string {
       return { success: true, tree }
     } catch (error: any) {
       console.error('[scanExternalDirs] Error:', error)
+      return { success: false, error: error.message }
+    }
+  })
+
+  // 创建外部文件夹
+  ipcMain.handle('file:create-external-dir', async (_event, dirPath: string) => {
+    try {
+      if (existsSync(dirPath)) {
+        return { success: false, error: '文件夹已存在' }
+      }
+      mkdirSync(dirPath, { recursive: true })
+      return { success: true }
+    } catch (error: any) {
+      return { success: false, error: error.message }
+    }
+  })
+
+  // 创建外部文件
+  ipcMain.handle('file:create-external-file', async (_event, filePath: string) => {
+    try {
+      if (existsSync(filePath)) {
+        return { success: false, error: '文件已存在' }
+      }
+      // 确保父目录存在
+      const parentDir = dirname(filePath)
+      if (!existsSync(parentDir)) {
+        mkdirSync(parentDir, { recursive: true })
+      }
+      writeFileSync(filePath, '', 'utf-8')
+      return { success: true }
+    } catch (error: any) {
+      return { success: false, error: error.message }
+    }
+  })
+
+  // 删除外部文件夹
+  ipcMain.handle('file:delete-external-dir', async (_event, dirPath: string) => {
+    try {
+      if (!existsSync(dirPath)) {
+        return { success: false, error: '文件夹不存在' }
+      }
+      const { rmSync } = await import('fs')
+      rmSync(dirPath, { recursive: true, force: true })
+      return { success: true }
+    } catch (error: any) {
+      return { success: false, error: error.message }
+    }
+  })
+
+  // 删除外部文件
+  ipcMain.handle('file:delete-external-file', async (_event, filePath: string) => {
+    try {
+      if (!existsSync(filePath)) {
+        return { success: false, error: '文件不存在' }
+      }
+      unlinkSync(filePath)
+      return { success: true }
+    } catch (error: any) {
       return { success: false, error: error.message }
     }
   })

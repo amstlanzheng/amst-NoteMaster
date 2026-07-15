@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import type { Note, FilterOptions } from '@shared/types'
 import { useUiStore } from './ui'
 
@@ -8,6 +8,27 @@ export const useNoteStore = defineStore('note', () => {
   const currentNote = ref<Note | null>(null)
   const loading = ref(false)
   const filters = ref<FilterOptions>({})
+
+  // 笔记访问历史
+  const noteHistory = ref<number[]>([])
+  const MAX_HISTORY = 50
+
+  // 记录笔记访问历史
+  watch(currentNote, (newNote, oldNote) => {
+    if (oldNote && oldNote.id !== newNote?.id) {
+      // 将上一个笔记 ID 加入历史
+      noteHistory.value.push(oldNote.id)
+      if (noteHistory.value.length > MAX_HISTORY) {
+        noteHistory.value.shift()
+      }
+    }
+  })
+
+  // 返回上一个笔记
+  function goBackNote(): number | null {
+    if (noteHistory.value.length === 0) return null
+    return noteHistory.value.pop()!
+  }
 
   const filteredNotes = computed(() => {
     return notes.value
@@ -81,8 +102,8 @@ export const useNoteStore = defineStore('note', () => {
   }
 
   return {
-    notes, currentNote, loading, filters, filteredNotes,
+    notes, currentNote, loading, filters, filteredNotes, noteHistory,
     fetchNotes, fetchNote, createNote, updateNote, deleteNote, batchDeleteNotes, duplicateNote,
-    setFilters, clearFilters
+    setFilters, clearFilters, goBackNote
   }
 })

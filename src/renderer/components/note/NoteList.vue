@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useNoteStore } from '../../stores/note'
 import { useCategoryStore } from '../../stores/category'
@@ -18,6 +18,13 @@ const batchMode = ref(false)
 const selectedIds = ref<Set<number>>(new Set())
 const batchDeleting = ref(false)
 const batchProgress = ref({ current: 0, total: 0 })
+const localSearchKeyword = ref('')
+let searchTimer: ReturnType<typeof setTimeout> | null = null
+
+// 切换分类时清除搜索关键词
+watch(() => categoryStore.selectedCategoryId, () => {
+  localSearchKeyword.value = ''
+})
 
 // 当前选中分类的直接子分类（用于在列表中显示为文件夹）
 const childCategories = computed(() => {
@@ -112,17 +119,43 @@ const sortedNotes = computed(() => {
   return [...noteStore.notes]
 })
 
-const sortLabel = computed(() => {
-  if (uiStore.noteSortBy === 'sort_weight') return '权重'
-  if (uiStore.noteSortBy === 'created_at') return '创建'
-  return '更新'
-})
-
 function handleSortChange(command: string) {
   const [sortBy, sortOrder] = command.split('-') as [string, string]
   uiStore.noteSortBy = sortBy as any
   uiStore.noteSortOrder = sortOrder as any
   noteStore.fetchNotes()
+}
+
+function handleLocalSearch() {
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => {
+    const keyword = localSearchKeyword.value.trim()
+    if (keyword) {
+      noteStore.setFilters({ keyword, include_subcategories: true })
+    } else {
+      // 清除搜索关键词，恢复不含关键词的筛选
+      const clean: any = {}
+      for (const [k, v] of Object.entries(noteStore.filters)) {
+        if (k !== 'keyword' && k !== 'include_subcategories') clean[k] = v
+      }
+      noteStore.filters = clean
+      noteStore.fetchNotes()
+    }
+  }, 300)
+}
+
+function clearLocalSearch() {
+  localSearchKeyword.value = ''
+  const clean: any = {}
+  for (const [k, v] of Object.entries(noteStore.filters)) {
+    if (k !== 'keyword' && k !== 'include_subcategories') clean[k] = v
+  }
+  noteStore.filters = clean
+  noteStore.fetchNotes()
+}
+
+function toggleViewMode() {
+  uiStore.noteViewMode = uiStore.noteViewMode === 'summary' ? 'list' : 'summary'
 }
 
 const listState = computed<'loading' | 'empty' | 'notes'>(() => {
@@ -377,17 +410,75 @@ async function batchDelete() {
     }
   } catch { /* cancel */ }
 }
+
+// 返回上级分类
+const canGoBackToParent = computed(() => {
+  if (categoryStore.selectedCategoryId === null) return false
+  const parentId = categoryStore.getParentCategoryId(categoryStore.selectedCategoryId)
+  return parentId !== undefined // undefined 表示找不到（不应该发生），null 表示父级是根
+})
+
+// 返回上一个笔记
+const canGoBackToPrevNote = computed(() => {
+  return noteStore.noteHistory.length > 0
+})
+
+function goBackToParent() {
+  const parentId = categoryStore.getParentCategoryId(categoryStore.selectedCategoryId)
+  // parentId 可能是 null（回到根级）或 number（回到父分类）
+  categoryStore.selectCategory(parentId ?? null)
+  noteStore.currentNote = null
+  noteStore.setFilters({ category_id: parentId ?? null })
+}
+
+// 返回上一个查看的笔记
+async function goBackToPrevNote() {
+  const prevId = noteStore.goBackNote()
+  if (prevId !== null) {
+    await noteStore.fetchNote(prevId)
+  }
+}
 </script>
 
 <template>
   <div class="note-list">
+    <!-- 标题行：导航 + 标题 + 新建 -->
     <div class="list-header">
-      <span class="list-title">{{ currentFilterTitle }}</span>
+      <div class="header-left">
+        <el-button v-if="canGoBackToParent" size="small" text title="返回上级分类" @click="goBackToParent" class="nav-btn">
+          <el-icon><ArrowUp /></el-icon>
+        </el-button>
+        <el-button v-if="canGoBackToPrevNote" size="small" text title="返回上一个笔记" @click="goBackToPrevNote" class="nav-btn">
+          <el-icon><ArrowLeft /></el-icon>
+        </el-button>
+        <span class="list-title">{{ currentFilterTitle }}</span>
+      </div>
       <div class="header-actions">
+        <template v-if="batchMode">
+          <el-button size="small" @click="selectAll">{{ selectedIds.size === sortedNotes.length ? '取消全选' : '全选' }}</el-button>
+          <el-button size="small" type="danger" :disabled="selectedIds.size === 0" @click="batchDelete">删除 ({{ selectedIds.size }})</el-button>
+          <el-button size="small" @click="toggleBatchMode">取消</el-button>
+        </template>
+        <el-button v-if="!batchMode" type="primary" size="small" :icon="'Plus'" @click="handleNewNote" class="new-btn">新建</el-button>
+      </div>
+    </div>
+
+    <!-- 工具栏：搜索 + 排序 + 视图 + 批量 -->
+    <div class="toolbar">
+      <el-input
+        v-model="localSearchKeyword"
+        placeholder="搜索当前分类..."
+        clearable
+        size="small"
+        :prefix-icon="'Search'"
+        @input="handleLocalSearch"
+        @clear="clearLocalSearch"
+        class="toolbar-search"
+      />
+      <div class="toolbar-actions">
         <el-dropdown v-if="!batchMode" trigger="click" @command="handleSortChange">
-          <el-button size="small" text title="排序方式">
+          <el-button size="small" text title="排序方式" class="toolbar-btn">
             <el-icon><Top /></el-icon>
-            <span class="sort-label">{{ sortLabel }}</span>
           </el-button>
           <template #dropdown>
             <el-dropdown-menu>
@@ -399,13 +490,12 @@ async function batchDelete() {
             </el-dropdown-menu>
           </template>
         </el-dropdown>
-        <el-button v-if="!batchMode" size="small" text @click="toggleBatchMode">批量</el-button>
-        <template v-if="batchMode">
-          <el-button size="small" @click="selectAll">{{ selectedIds.size === sortedNotes.length ? '取消全选' : '全选' }}</el-button>
-          <el-button size="small" type="danger" :disabled="selectedIds.size === 0" @click="batchDelete">删除 ({{ selectedIds.size }})</el-button>
-          <el-button size="small" @click="toggleBatchMode">取消</el-button>
-        </template>
-        <el-button v-if="!batchMode" type="primary" size="small" :icon="'Plus'" @click="handleNewNote">新建</el-button>
+        <el-button v-if="!batchMode" size="small" text :title="uiStore.noteViewMode === 'summary' ? '列表视图' : '摘要视图'" @click="toggleViewMode" class="toolbar-btn">
+          <el-icon><component :is="uiStore.noteViewMode === 'summary' ? 'List' : 'Grid'" /></el-icon>
+        </el-button>
+        <el-button v-if="!batchMode" size="small" text title="批量操作" @click="toggleBatchMode" class="toolbar-btn">
+          <el-icon><Document /></el-icon>
+        </el-button>
       </div>
     </div>
 
@@ -446,12 +536,15 @@ async function batchDelete() {
         <template v-else>
         <div v-for="note in sortedNotes" :key="note.id"
           class="note-card"
-          :class="{ active: noteStore.currentNote?.id === note.id, pinned: note.is_pinned }"
+          :class="{ active: noteStore.currentNote?.id === note.id, pinned: note.is_pinned, 'list-mode': uiStore.noteViewMode === 'list' }"
           :draggable="!batchMode"
           @click="batchMode ? toggleSelect(note, $event) : selectNote(note)"
           @contextmenu="batchMode ? null : handleNoteContextMenu($event, note)"
           @dragstart="batchMode ? null : onDragStart($event, note)">
           <el-checkbox v-if="batchMode" :model-value="selectedIds.has(note.id)" class="batch-check" @change="toggleSelect(note, $event)" />
+          <div class="card-icon">
+            <el-icon><Document /></el-icon>
+          </div>
           <div class="card-body">
             <div class="card-header">
               <span class="card-title">
@@ -460,7 +553,7 @@ async function batchDelete() {
               </span>
               <el-icon v-if="note.is_favorite" class="fav-icon"><StarFilled /></el-icon>
             </div>
-            <div class="card-preview">{{ getPreview(note) }}</div>
+            <div v-if="uiStore.noteViewMode === 'summary'" class="card-preview">{{ getPreview(note) }}</div>
             <div class="card-meta">
               <span class="card-tags" v-if="note.tags?.length">
                 <span v-for="tag in note.tags" :key="tag.id" class="card-tag">
@@ -468,13 +561,14 @@ async function batchDelete() {
                   {{ tag.name }}
                 </span>
               </span>
-              <!-- 显示子分类名称 -->
               <span v-if="getSubCategoryName(note)" class="sub-category-badge">
                 <el-icon><Folder /></el-icon>
                 {{ getSubCategoryName(note) }}
               </span>
-              <span class="card-date">{{ formatRelative(note.updated_at) }}</span>
-              <span v-if="uiStore.noteSortBy === 'sort_weight' && note.sort_weight" class="card-weight">W:{{ note.sort_weight }}</span>
+              <span class="card-meta-right">
+                <span class="card-date">{{ formatRelative(note.updated_at) }}</span>
+                <span v-if="uiStore.noteSortBy === 'sort_weight' && note.sort_weight" class="card-weight">W:{{ note.sort_weight }}</span>
+              </span>
             </div>
           </div>
         </div>
@@ -522,62 +616,92 @@ async function batchDelete() {
 
 <style scoped>
 .note-list { height: 100%; display: flex; flex-direction: column; }
-.list-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--border-color); }
-.header-actions { display: flex; align-items: center; gap: 6px; }
-.sort-label { font-size: 12px; margin-left: 2px; }
+
+/* 标题行 */
+.list-header { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border-bottom: 1px solid var(--border-color); }
+.header-left { display: flex; align-items: center; gap: 0; min-width: 0; flex: 1; }
+.nav-btn { padding: 4px !important; margin-right: 2px; }
+.nav-btn .el-icon { font-size: 15px; }
+.list-title { font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-left: 4px; }
+.header-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.new-btn { padding: 5px 12px !important; font-size: 12px; }
+
+/* 工具栏 */
+.toolbar { display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-bottom: 1px solid var(--border-color); }
+.toolbar-search { flex: 1; }
+.toolbar-search :deep(.el-input__wrapper) { border-radius: 6px; }
+.toolbar-search :deep(.el-input__inner) { font-size: 13px; }
+.toolbar-actions { display: flex; align-items: center; gap: 0; flex-shrink: 0; }
+.toolbar-btn { padding: 4px 6px !important; }
+.toolbar-btn .el-icon { font-size: 15px; }
+
 :deep(.el-dropdown-menu__item.is-active) { color: var(--el-color-primary); font-weight: 600; }
-.list-title { font-size: 15px; font-weight: 600; }
+
+/* 笔记列表 */
 .list-content { flex: 1; }
-.note-card { padding: 12px 16px; cursor: pointer; border-bottom: 1px solid var(--border-color); transition: background 0.15s ease; user-select: none; display: flex; align-items: flex-start; gap: 10px; }
+
+/* 摘要模式卡片 */
+.note-card { padding: 12px 14px; cursor: pointer; border-bottom: 1px solid var(--border-color); transition: background 0.15s ease; user-select: none; display: flex; align-items: flex-start; gap: 10px; }
+.note-card:hover { background: var(--hover-bg); }
+.note-card.active { background: var(--active-bg); border-left: 3px solid var(--accent-color); padding-left: 11px; }
+.card-icon { flex-shrink: 0; width: 32px; height: 32px; border-radius: 8px; background: rgba(64, 158, 255, 0.08); display: flex; align-items: center; justify-content: center; margin-top: 1px; }
+.card-icon .el-icon { font-size: 16px; color: var(--accent-color); }
+.note-card.active .card-icon { background: rgba(64, 158, 255, 0.15); }
+:root.dark .card-icon { background: rgba(64, 158, 255, 0.12); }
 .card-body { flex: 1; min-width: 0; }
 .batch-check { flex-shrink: 0; margin-top: 2px; }
-.note-card:hover { background: var(--hover-bg); }
-.note-card.active { background: var(--active-bg); border-left: 3px solid var(--accent-color); }
-.card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
-.card-title { font-size: 14px; font-weight: 500; display: flex; align-items: center; gap: 4px; }
-.pin-icon { color: var(--accent-color); font-size: 12px; }
-.fav-icon { color: #f5a623; font-size: 12px; }
-.card-preview { font-size: 12px; color: var(--text-tertiary); line-height: 1.5; margin-bottom: 8px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.card-meta { display: flex; align-items: center; justify-content: space-between; font-size: 11px; color: var(--text-tertiary); gap: 8px; }
+
+.card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 3px; }
+.card-title { font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.5; }
+.pin-icon { color: var(--accent-color); font-size: 12px; flex-shrink: 0; }
+.fav-icon { color: #f5a623; font-size: 12px; flex-shrink: 0; margin-left: 4px; }
+
+.card-preview { font-size: 12px; color: var(--text-tertiary); line-height: 1.6; margin-bottom: 6px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+.card-meta { display: flex; align-items: center; font-size: 11px; color: var(--text-tertiary); gap: 6px; flex-wrap: wrap; }
+.card-meta-right { margin-left: auto; display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.card-date { white-space: nowrap; }
 .card-weight { font-size: 10px; color: var(--accent-color); background: rgba(64, 158, 255, 0.1); padding: 1px 4px; border-radius: 3px; white-space: nowrap; }
-.card-tags { display: flex; gap: 6px; flex-wrap: wrap; }
+
+.card-tags { display: flex; gap: 4px; flex-wrap: wrap; }
+.card-tag {
+  font-size: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 6px;
+  background: rgba(0, 0, 0, 0.04);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  font-weight: 500;
+  line-height: 1.6;
+}
+.card-tag .tag-dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+:root.dark .card-tag { background: rgba(255, 255, 255, 0.08); color: var(--text-primary); }
+
 .sub-category-badge {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 2px 8px;
-  background: rgba(64, 158, 255, 0.1);
-  border-radius: 10px;
+  gap: 3px;
+  padding: 1px 6px;
+  background: rgba(64, 158, 255, 0.08);
+  border-radius: 8px;
   color: var(--accent-color);
   font-weight: 500;
-  font-size: 11px;
+  font-size: 10px;
   white-space: nowrap;
+  line-height: 1.6;
 }
-.sub-category-badge .el-icon {
-  font-size: 12px;
-}
-.card-tag { 
-  font-size: 11px;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 8px;
-  background: rgba(0, 0, 0, 0.05);
-  border-radius: 10px;
-  color: var(--text-secondary);
-  font-weight: 500;
-}
-.card-tag .tag-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  display: inline-block;
-  flex-shrink: 0;
-}
-:root.dark .card-tag {
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--text-primary);
-}
+.sub-category-badge .el-icon { font-size: 10px; }
+
+/* 列表模式卡片 */
+.note-card.list-mode { padding: 7px 14px; align-items: center; }
+.note-card.list-mode .card-header { margin-bottom: 0; }
+.note-card.list-mode .card-meta { display: none; }
+.note-card.list-mode .card-preview { display: none; }
+.note-card.list-mode .card-icon { width: 24px; height: 24px; border-radius: 6px; margin-top: 0; }
+.note-card.list-mode .card-icon .el-icon { font-size: 12px; }
+
 .loading-state, .empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 200px; color: var(--text-tertiary); gap: 12px; }
 
 /* 子文件夹区域 */

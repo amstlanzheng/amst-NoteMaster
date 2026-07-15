@@ -22,6 +22,7 @@
     "highlight.js": "^11.11.1",
     "jszip": "^3.10.1",
     "markdown-it": "^14.2.0",
+    "minio": "^8.0.7",
     "sql.js": "^1.12.0",
     "ssh2-sftp-client": "^12.1.1",
     "vue-echarts": "^8.0.1"

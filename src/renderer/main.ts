@@ -7,7 +7,8 @@ import {
   Loading, Folder, Document, Top, StarFilled, Edit, Download, Delete,
   Close, View, Picture, Bottom, Search, Sunny, Moon, FolderAdd,
   ArrowDown, ArrowRight, Calendar, Star, Brush, Plus, Upload,
-  CollectionTag, DataAnalysis, Setting, FolderOpened, DocumentAdd
+  CollectionTag, DataAnalysis, Setting, FolderOpened, DocumentAdd,
+  List, Grid, ArrowUp, ArrowLeft
 } from '@element-plus/icons-vue'
 import App from './App.vue'
 import router from './router'
@@ -25,7 +26,8 @@ const icons: Record<string, any> = {
   Loading, Folder, Document, Top, StarFilled, Edit, Download, Delete,
   Close, View, Picture, Bottom, Search, Sunny, Moon, FolderAdd,
   ArrowDown, ArrowRight, Calendar, Star, Brush, Plus, Upload,
-  CollectionTag, DataAnalysis, Setting, FolderOpened, DocumentAdd
+  CollectionTag, DataAnalysis, Setting, FolderOpened, DocumentAdd,
+  List, Grid, ArrowUp, ArrowLeft
 }
 for (const [key, component] of Object.entries(icons)) {
   app.component(key, component)

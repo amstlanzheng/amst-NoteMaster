@@ -354,22 +354,48 @@ async function handlePasteImage(event: ClipboardEvent) {
       const blob = item.getAsFile()
       if (!blob) continue
       
-      // 检查图片大小（限制 1MB）
-      const maxSize = 1024 * 1024 // 1MB
-      if (blob.size > maxSize) {
-        ElMessage.warning(`图片大小超过限制（${(blob.size / 1024 / 1024).toFixed(2)}MB > 1MB），请压缩后再粘贴`)
-        break
-      }
-      
       // 获取当前图片存储模式
       const storageMode = localStorage.getItem('amnote-image-storage-mode') || 'base64'
+      
+      // MinIO 模式允许 10MB，其他模式 1MB
+      const maxSize = storageMode === 'minio' ? 10 * 1024 * 1024 : 1024 * 1024
+      if (blob.size > maxSize) {
+        const limitMB = storageMode === 'minio' ? '10MB' : '1MB'
+        ElMessage.warning(`图片大小超过限制（${(blob.size / 1024 / 1024).toFixed(2)}MB > ${limitMB}），请压缩后再粘贴`)
+        break
+      }
       
       try {
         // 获取光标位置（在异步操作前保存，避免丢失）
         const textarea = document.querySelector('.edit-textarea') as HTMLTextAreaElement
         const cursorPos = textarea ? textarea.selectionStart : editContent.value.length
 
-        if (storageMode === 'folder') {
+        if (storageMode === 'minio') {
+          // MinIO 存储模式：上传到 MinIO 服务器
+          const minioConfigStr = localStorage.getItem('amnote-minio-config')
+          if (!minioConfigStr) {
+            ElMessage.error('未配置 MinIO，请在设置中配置')
+            break
+          }
+          const minioConfig = JSON.parse(minioConfigStr)
+          const arrayBuffer = await blob.arrayBuffer()
+          const buffer = Array.from(new Uint8Array(arrayBuffer))
+          const result = await window.api.uploadToMinio({
+            buffer,
+            filename: `pasted_${Date.now()}.${blob.type.split('/')[1] || 'png'}`,
+            noteId: noteStore.currentNote!.id,
+            config: minioConfig
+          })
+          
+          if (result.error) {
+            throw new Error(result.error)
+          }
+          
+          const mdImg = `\n![](${result.path})\n`
+          insertAtCursor(mdImg, cursorPos)
+          triggerAutoSave()
+          ElMessage.success('图片已插入（MinIO 存储）')
+        } else if (storageMode === 'folder') {
           // 文件夹存储模式：保存图片到本地并返回路径
           const arrayBuffer = await blob.arrayBuffer()
           const buffer = Array.from(new Uint8Array(arrayBuffer))

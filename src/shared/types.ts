@@ -68,6 +68,7 @@ export interface FilterOptions {
   year?: number
   month?: number
   keyword?: string
+  include_subcategories?: boolean
   sort_by?: 'updated_at' | 'created_at' | 'sort_weight'
   sort_order?: 'asc' | 'desc'
 }
@@ -105,7 +106,18 @@ export interface ContextMenuItem {
 }
 
 // 图片存储模式
-export type ImageStorageMode = 'base64' | 'folder'
+export type ImageStorageMode = 'base64' | 'folder' | 'minio'
+
+// MinIO 配置
+export interface MinioConfig {
+  endPoint: string
+  port: number
+  accessKey: string
+  secretKey: string
+  bucket: string
+  useSSL: boolean
+  pathPrefix: string
+}
 
 // 应用设置
 export interface AppSettings {

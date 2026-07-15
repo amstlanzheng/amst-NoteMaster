@@ -9,34 +9,59 @@
     #splash {
       position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 9999;
       display: flex; flex-direction: column; align-items: center; justify-content: center;
-      background: linear-gradient(135deg, #f5f7fa 0%, #e4e9f0 100%);
+      background: linear-gradient(160deg, #0d0a1a 0%, #1a1035 25%, #2a1548 50%, #1f0f3a 75%, #0d0a1a 100%);
       font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
-      transition: opacity 0.4s ease;
+      transition: opacity 0.5s ease;
+      overflow: hidden;
+    }
+    #splash::before {
+      content: ''; position: absolute; top: -50%; left: -50%; width: 200%; height: 200%;
+      background: radial-gradient(ellipse at 35% 40%, rgba(245, 200, 66, 0.08) 0%, transparent 45%),
+                  radial-gradient(ellipse at 65% 60%, rgba(120, 50, 180, 0.1) 0%, transparent 45%),
+                  radial-gradient(ellipse at 50% 90%, rgba(245, 180, 40, 0.05) 0%, transparent 35%);
+      animation: bgShift 10s ease-in-out infinite alternate;
+    }
+    #splash::after {
+      content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+      background: radial-gradient(circle at 50% 45%, rgba(245, 200, 66, 0.03) 0%, transparent 60%);
+      pointer-events: none;
     }
     #splash.hidden { opacity: 0; pointer-events: none; }
-    #splash .logo { width: 72px; height: 72px; background: #0078d4; border-radius: 18px;
-      display: flex; align-items: center; justify-content: center; margin-bottom: 24px;
-      box-shadow: 0 8px 28px rgba(0,120,212,0.35); animation: logoPulse 2s ease-in-out infinite; }
-    #splash .logo svg { width: 40px; height: 40px; fill: #fff; }
-    #splash .title { font-size: 28px; font-weight: 700; color: #1a1a2e; margin-bottom: 8px; }
-    #splash .subtitle { font-size: 13px; color: #666; margin-bottom: 32px; max-width: 280px; text-align: center; line-height: 1.6; }
-    #splash .loading-area { display: flex; flex-direction: column; align-items: center; gap: 16px; }
+    #splash .logo {
+      width: 80px; height: 80px; position: relative;
+      background: linear-gradient(145deg, #f5c842 0%, #e8a020 40%, #c4881a 70%, #8b5e14 100%);
+      border-radius: 20px;
+      display: flex; align-items: center; justify-content: center; margin-bottom: 28px;
+      box-shadow: 0 4px 20px rgba(245, 200, 66, 0.25), 0 0 50px rgba(245, 200, 66, 0.08), inset 0 1px 0 rgba(255,255,255,0.2);
+      animation: logoPulse 3s ease-in-out infinite;
+    }
+    #splash .logo svg { width: 42px; height: 42px; fill: #1a0a2e; }
+    #splash .title {
+      font-size: 32px; font-weight: 700; position: relative;
+      background: linear-gradient(90deg, #f5c842, #ffd866, #f0b030, #f5c842);
+      background-size: 200% 100%;
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      background-clip: text; margin-bottom: 8px; letter-spacing: 2px;
+      animation: titleShimmer 4s ease-in-out infinite;
+    }
+    #splash .subtitle {
+      font-size: 13px; color: rgba(180, 160, 210, 0.6); margin-bottom: 36px;
+      max-width: 280px; text-align: center; line-height: 1.6; position: relative;
+      letter-spacing: 0.5px;
+    }
+    #splash .loading-area { display: flex; flex-direction: column; align-items: center; gap: 16px; position: relative; }
     #splash .spinner {
-      width: 32px; height: 32px; border: 3px solid #e0e0e0;
-      border-top-color: #0078d4; border-radius: 50%; animation: spin 0.8s linear infinite;
+      width: 28px; height: 28px;
+      border: 2.5px solid rgba(120, 50, 180, 0.2);
+      border-top-color: #f5c842; border-right-color: rgba(180, 100, 255, 0.4);
+      border-radius: 50%; animation: spin 0.7s linear infinite;
     }
-    #splash .load-text { font-size: 13px; color: #888; min-height: 20px; transition: opacity 0.3s; }
-    #splash .version { font-size: 11px; color: #bbb; margin-top: 48px; }
-    @keyframes logoPulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.05); } }
+    #splash .load-text { font-size: 12px; color: rgba(180, 160, 210, 0.4); min-height: 18px; transition: opacity 0.3s; position: relative; }
+    #splash .version { font-size: 11px; color: rgba(180, 160, 210, 0.2); margin-top: 56px; position: relative; letter-spacing: 1px; }
+    @keyframes logoPulse { 0%, 100% { transform: scale(1); box-shadow: 0 4px 20px rgba(245, 200, 66, 0.25), 0 0 50px rgba(245, 200, 66, 0.08); } 50% { transform: scale(1.04); box-shadow: 0 6px 28px rgba(245, 200, 66, 0.35), 0 0 70px rgba(245, 200, 66, 0.12); } }
     @keyframes spin { to { transform: rotate(360deg); } }
-    @media (prefers-color-scheme: dark) {
-      #splash { background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); }
-      #splash .title { color: #e0e0e0; }
-      #splash .subtitle { color: #999; }
-      #splash .spinner { border-color: #333; border-top-color: #60cdff; }
-      #splash .load-text { color: #777; }
-      #splash .logo { background: #0078d4; box-shadow: 0 8px 28px rgba(0,120,212,0.25); }
-    }
+    @keyframes bgShift { 0% { transform: translate(0, 0) rotate(0deg); } 100% { transform: translate(1.5%, -1.5%) rotate(2deg); } }
+    @keyframes titleShimmer { 0%, 100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
   </style>
 </head>
 <body>
@@ -63,17 +88,30 @@
       } else {
         clearInterval(loadTimer);
       }
-    }, 1200);
+    }, 800);
+    var splashStartTime = Date.now();
+    var MIN_SPLASH_MS = 1500; // 最少显示 1.5 秒，确保用户能看到
+    var splashHidden = false;
     // 由 Vue 应用在数据加载完成后调用
     window.__appReady = function() {
+      if (splashHidden) return;
+      splashHidden = true;
       clearInterval(loadTimer);
       var el = document.getElementById('splash');
-      if (el) {
+      if (!el) return;
+      var elapsed = Date.now() - splashStartTime;
+      var remaining = MIN_SPLASH_MS - elapsed;
+      var doHide = function() {
         document.getElementById('load-text').textContent = '就绪';
         setTimeout(function() {
           el.classList.add('hidden');
           setTimeout(function() { el.remove(); }, 500);
-        }, 300);
+        }, 200);
+      };
+      if (remaining > 0) {
+        setTimeout(doHide, remaining);
+      } else {
+        doHide();
       }
     };
     // 安全兜底：如果 8 秒后 Vue 仍未调用，强制隐藏

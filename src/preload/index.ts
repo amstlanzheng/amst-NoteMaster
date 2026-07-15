@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { Note, Category, Tag, FilterOptions, SftpConfig } from '../shared/types'
+import type { Note, Category, Tag, FilterOptions, SftpConfig, MinioConfig } from '../shared/types'
 
 const api = {
   getNotes: (filters?: FilterOptions) => ipcRenderer.invoke('db:get-notes', filters),
@@ -74,10 +74,18 @@ const api = {
   scanExternalDirs: (parentPath?: string) => ipcRenderer.invoke('file:scan-external-dirs', parentPath),
   openExternalFile: (filePath: string) => ipcRenderer.invoke('file:open-external', filePath),
   saveExternalFile: (filePath: string, base64Content: string) => ipcRenderer.invoke('file:save-external', filePath, base64Content),
+  createExternalDir: (dirPath: string) => ipcRenderer.invoke('file:create-external-dir', dirPath),
+  createExternalFile: (filePath: string) => ipcRenderer.invoke('file:create-external-file', filePath),
+  deleteExternalDir: (dirPath: string) => ipcRenderer.invoke('file:delete-external-dir', dirPath),
+  deleteExternalFile: (filePath: string) => ipcRenderer.invoke('file:delete-external-file', filePath),
 
   testSyncConnection: (config: SftpConfig) => ipcRenderer.invoke('sync:test-connection', config),
   uploadToCloud: (config: SftpConfig) => ipcRenderer.invoke('sync:upload', config),
   downloadFromCloud: (config: SftpConfig) => ipcRenderer.invoke('sync:download', config),
+
+  // MinIO
+  testMinioConnection: (config: MinioConfig) => ipcRenderer.invoke('minio:test-connection', config),
+  uploadToMinio: (data: { buffer: number[]; filename: string; noteId: number; config: MinioConfig }) => ipcRenderer.invoke('minio:upload', data),
 
   onGlobalSearch: (callback: () => void) => {
     ipcRenderer.on('global-search', callback)
@@ -102,6 +110,13 @@ const api = {
   onExportProgress: (callback: (data: { current: number; total: number; status: string }) => void) => {
     ipcRenderer.on('export-progress', (_event, data) => callback(data))
     return () => ipcRenderer.removeListener('export-progress', callback as any)
+  },
+
+  isDbReady: () => ipcRenderer.invoke('db:is-ready'),
+
+  onDbReady: (callback: () => void) => {
+    ipcRenderer.on('db:ready', callback)
+    return () => ipcRenderer.removeListener('db:ready', callback)
   },
 
   quitApp: () => ipcRenderer.send('app:quit'),

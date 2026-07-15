@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import type { Category } from '@shared/types'
 
 export const useCategoryStore = defineStore('category', () => {
@@ -7,6 +7,41 @@ export const useCategoryStore = defineStore('category', () => {
   const favoriteCategories = ref<Category[]>([])
   const loading = ref(false)
   const selectedCategoryId = ref<number | null>(null)
+
+  // 分类导航历史
+  const categoryHistory = ref<(number | null)[]>([])
+
+  // 记录分类切换历史
+  watch(selectedCategoryId, (newId, oldId) => {
+    if (oldId !== undefined && oldId !== newId) {
+      categoryHistory.value.push(oldId)
+      if (categoryHistory.value.length > 50) {
+        categoryHistory.value.shift()
+      }
+    }
+  })
+
+  // 返回上级分类
+  function goBackCategory(): number | null {
+    if (categoryHistory.value.length === 0) return null
+    return categoryHistory.value.pop()!
+  }
+
+  // 获取当前分类的父分类 ID，找不到返回 undefined
+  function getParentCategoryId(catId: number | null): number | null | undefined {
+    if (catId === null) return undefined
+    const findParent = (cats: Category[], targetId: number, parentId: number | null): number | null | undefined => {
+      for (const c of cats) {
+        if (c.id === targetId) return parentId
+        if (c.children) {
+          const found = findParent(c.children, targetId, c.id)
+          if (found !== undefined) return found
+        }
+      }
+      return undefined
+    }
+    return findParent(categories.value, catId, null)
+  }
 
   async function fetchCategories() {
     loading.value = true
@@ -43,7 +78,8 @@ export const useCategoryStore = defineStore('category', () => {
   }
 
   return {
-    categories, favoriteCategories, loading, selectedCategoryId,
-    fetchCategories, fetchFavorites, createCategory, updateCategory, deleteCategory, selectCategory
+    categories, favoriteCategories, loading, selectedCategoryId, categoryHistory,
+    fetchCategories, fetchFavorites, createCategory, updateCategory, deleteCategory, selectCategory,
+    goBackCategory, getParentCategoryId
   }
 })

@@ -5,7 +5,7 @@ import { useUiStore } from '../stores/ui'
 import { useNoteStore } from '../stores/note'
 import { useCategoryStore } from '../stores/category'
 import { useTagStore } from '../stores/tag'
-import type { SftpConfig, ImageStorageMode } from '@shared/types'
+import type { SftpConfig, ImageStorageMode, MinioConfig } from '@shared/types'
 
 const uiStore = useUiStore()
 const noteStore = useNoteStore()
@@ -32,6 +32,19 @@ const syncMessage = ref('')
 const syncLastSync = ref('')
 const closeBehavior = ref<'quit' | 'minimize'>('quit')
 const isPasswordSaved = ref(false)
+
+// MinIO 配置
+const minioConfig = ref<MinioConfig>({
+  endPoint: '',
+  port: 9000,
+  accessKey: '',
+  secretKey: '',
+  bucket: 'amnote',
+  useSSL: false,
+  pathPrefix: 'images'
+})
+const minioStatus = ref<'idle' | 'testing' | 'connected' | 'error'>('idle')
+const minioMessage = ref('')
 
 function loadSshConfig() {
   try {
@@ -617,13 +630,14 @@ onMounted(() => {
   loadSshConfig()
   loadCloseBehavior()
   loadImageStorageMode()
+  loadMinioConfig()
   loadDbPath()
 })
 
 function loadImageStorageMode() {
   try {
     const saved = localStorage.getItem('amnote-image-storage-mode')
-    if (saved === 'base64' || saved === 'folder') {
+    if (saved === 'base64' || saved === 'folder' || saved === 'minio') {
       imageStorageMode.value = saved
     }
   } catch {}
@@ -632,8 +646,47 @@ function loadImageStorageMode() {
 function saveImageStorageMode(mode: ImageStorageMode) {
   try {
     localStorage.setItem('amnote-image-storage-mode', mode)
-    ElMessage.success(`图片存储模式已切换为：${mode === 'base64' ? 'Base64 嵌入' : '文件夹存储'}`)
+    const labels: Record<ImageStorageMode, string> = {
+      base64: 'Base64 嵌入',
+      folder: '文件夹存储',
+      minio: 'MinIO 对象存储'
+    }
+    ElMessage.success(`图片存储模式已切换为：${labels[mode]}`)
   } catch {}
+}
+
+function loadMinioConfig() {
+  try {
+    const saved = localStorage.getItem('amnote-minio-config')
+    if (saved) {
+      const cfg = JSON.parse(saved)
+      Object.assign(minioConfig.value, cfg)
+    }
+  } catch {}
+}
+
+function saveMinioConfig() {
+  try {
+    localStorage.setItem('amnote-minio-config', JSON.stringify(minioConfig.value))
+    ElMessage.success('MinIO 配置已保存')
+  } catch {}
+}
+
+async function testMinioConnection() {
+  if (!minioConfig.value.endPoint || !minioConfig.value.accessKey || !minioConfig.value.secretKey) {
+    ElMessage.warning('请填写完整的 MinIO 连接信息')
+    return
+  }
+  minioStatus.value = 'testing'
+  minioMessage.value = ''
+  try {
+    const result = await window.api.testMinioConnection(minioConfig.value)
+    minioStatus.value = result.ok ? 'connected' : 'error'
+    minioMessage.value = result.message
+  } catch (e: any) {
+    minioStatus.value = 'error'
+    minioMessage.value = `连接失败：${e.message || e}`
+  }
 }
 
 async function loadDbPath() {
@@ -674,38 +727,91 @@ function copyDbPath() {
     <el-card class="setting-card">
       <template #header><span>图片存储方式</span></template>
       <p class="desc">选择粘贴图片时的存储方式：</p>
-      <div class="setting-row">
-        <el-radio-group v-model="imageStorageMode" @change="saveImageStorageMode">
-          <el-radio value="base64">
-            <div style="display: flex; flex-direction: column; gap: 4px;">
-              <span style="font-weight: 500;">Base64 嵌入</span>
-              <span style="font-size: 12px; color: var(--text-tertiary);">图片转换为 Base64 直接嵌入 Markdown，方便单文件分享</span>
-            </div>
-          </el-radio>
-          <el-radio value="folder">
-            <div style="display: flex; flex-direction: column; gap: 4px;">
-              <span style="font-weight: 500;">文件夹存储（推荐）</span>
-              <span style="font-size: 12px; color: var(--text-tertiary);">图片保存到独立文件夹，Markdown 中引用路径，适合大量图片</span>
-            </div>
-          </el-radio>
-        </el-radio-group>
+      <div class="storage-mode-cards">
+        <div class="storage-card" :class="{ active: imageStorageMode === 'base64' }" @click="imageStorageMode = 'base64'; saveImageStorageMode('base64')">
+          <div class="storage-card-radio"><el-radio value="base64" v-model="imageStorageMode">&nbsp;</el-radio></div>
+          <div class="storage-card-body">
+            <div class="storage-card-title">Base64 嵌入</div>
+            <div class="storage-card-desc">图片转换为 Base64 直接嵌入 Markdown，方便单文件分享</div>
+          </div>
+        </div>
+        <div class="storage-card" :class="{ active: imageStorageMode === 'folder' }" @click="imageStorageMode = 'folder'; saveImageStorageMode('folder')">
+          <div class="storage-card-radio"><el-radio value="folder" v-model="imageStorageMode">&nbsp;</el-radio></div>
+          <div class="storage-card-body">
+            <div class="storage-card-title">文件夹存储 <el-tag size="small" type="success">推荐</el-tag></div>
+            <div class="storage-card-desc">图片保存到独立文件夹，Markdown 中引用路径，适合大量图片</div>
+          </div>
+        </div>
+        <div class="storage-card" :class="{ active: imageStorageMode === 'minio' }" @click="imageStorageMode = 'minio'; saveImageStorageMode('minio')">
+          <div class="storage-card-radio"><el-radio value="minio" v-model="imageStorageMode">&nbsp;</el-radio></div>
+          <div class="storage-card-body">
+            <div class="storage-card-title">MinIO 对象存储</div>
+            <div class="storage-card-desc">图片上传到 MinIO 服务器，Markdown 中引用 URL，适合多设备访问</div>
+          </div>
+        </div>
       </div>
       <el-alert
-        title="温馨提示"
-        type="warning"
+        v-if="imageStorageMode === 'folder'"
+        title="文件夹模式说明"
+        type="info"
         :closable="false"
         style="margin-top: 12px;"
       >
         <div style="font-size: 13px; line-height: 1.6;">
-          <p style="margin: 0 0 8px 0;"><strong>文件夹模式注意事项：</strong></p>
           <ul style="margin: 0; padding-left: 20px;">
-            <li>备份和导出数据时，需要同时备份图片文件夹（amnote-data/files/）</li>
-            <li>导出为 ZIP 或文件夹格式时，图片会自动包含在内</li>
-            <li>导出为 JSON 备份时，仅包含数据库内容，不包含图片文件</li>
-            <li>建议在重要操作前手动备份整个 amnote-data 目录</li>
+            <li>图片保存在本地 amnote-data/files/ 目录，Markdown 中引用相对路径</li>
+            <li>导出 JSON / ZIP / 文件夹格式时，图片会自动包含在内</li>
+            <li>迁移到其他设备时，需同时拷贝 amnote-data 目录</li>
           </ul>
         </div>
       </el-alert>
+      <el-alert
+        v-if="imageStorageMode === 'minio'"
+        title="MinIO 模式说明"
+        type="info"
+        :closable="false"
+        style="margin-top: 12px;"
+      >
+        <div style="font-size: 13px; line-height: 1.6;">
+          <p style="margin: 0 0 8px 0;"><strong>MinIO 模式注意事项：</strong></p>
+          <ul style="margin: 0; padding-left: 20px;">
+            <li>图片上传到 MinIO 服务器后，Markdown 中保存的是 HTTP URL</li>
+            <li>需要确保 MinIO 服务器可访问，否则图片无法显示</li>
+            <li>单文件大小限制为 10MB</li>
+            <li>建议配置 Bucket 的公开读取策略，或使用 Nginx 反向代理</li>
+          </ul>
+        </div>
+      </el-alert>
+    </el-card>
+
+    <el-card v-if="imageStorageMode === 'minio'" class="setting-card">
+      <template #header><span>MinIO 配置</span></template>
+      <p class="desc">配置 MinIO 对象存储服务连接信息：</p>
+      <el-form label-position="top" size="small">
+        <el-row :gutter="12">
+          <el-col :span="16"><el-form-item label="服务地址"><el-input v-model="minioConfig.endPoint" placeholder="minio.example.com" /></el-form-item></el-col>
+          <el-col :span="8"><el-form-item label="端口"><el-input v-model.number="minioConfig.port" placeholder="9000" type="number" /></el-form-item></el-col>
+        </el-row>
+        <el-form-item label="Access Key"><el-input v-model="minioConfig.accessKey" placeholder="输入 Access Key" /></el-form-item>
+        <el-form-item label="Secret Key"><el-input v-model="minioConfig.secretKey" type="password" placeholder="输入 Secret Key" show-password /></el-form-item>
+        <el-row :gutter="12">
+          <el-col :span="12"><el-form-item label="Bucket"><el-input v-model="minioConfig.bucket" placeholder="amnote" /></el-form-item></el-col>
+          <el-col :span="12"><el-form-item label="路径前缀"><el-input v-model="minioConfig.pathPrefix" placeholder="images" /></el-form-item></el-col>
+        </el-row>
+        <el-form-item label="SSL">
+          <el-switch v-model="minioConfig.useSSL" active-text="启用" inactive-text="关闭" />
+        </el-form-item>
+      </el-form>
+      <div class="sync-actions">
+        <el-button size="default" :loading="minioStatus === 'testing'" @click="testMinioConnection">测试连接</el-button>
+        <el-button type="primary" size="default" @click="saveMinioConfig">保存配置</el-button>
+      </div>
+      <div v-if="minioMessage" class="sync-status" :class="minioStatus">
+        <span v-if="minioStatus === 'connected'">✅</span>
+        <span v-else-if="minioStatus === 'error'">❌</span>
+        <span v-else-if="minioStatus === 'testing'">⏳</span>
+        {{ minioMessage }}
+      </div>
     </el-card>
 
     <el-card class="setting-card">
@@ -884,6 +990,22 @@ function copyDbPath() {
   flex-shrink: 0;
 }
 .desc { font-size: 13px; color: var(--text-secondary); margin-bottom: 12px; line-height: 1.6; }
+
+/* 存储方式卡片 */
+.storage-mode-cards { display: flex; flex-direction: column; gap: 10px; }
+.storage-card {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 14px 16px; border-radius: 8px;
+  border: 1.5px solid var(--border-color, rgba(0,0,0,0.1));
+  cursor: pointer; transition: all 0.2s ease;
+  background: var(--bg-primary, #fff);
+}
+.storage-card:hover { border-color: var(--el-color-primary-light-3, #79bbff); background: var(--el-color-primary-light-9, #ecf5ff); }
+.storage-card.active { border-color: var(--el-color-primary, #409eff); background: var(--el-color-primary-light-9, #ecf5ff); box-shadow: 0 0 0 1px var(--el-color-primary, #409eff); }
+.storage-card-radio { padding-top: 2px; flex-shrink: 0; }
+.storage-card-body { flex: 1; min-width: 0; }
+.storage-card-title { font-weight: 600; font-size: 14px; margin-bottom: 4px; display: flex; align-items: center; gap: 6px; }
+.storage-card-desc { font-size: 12px; color: var(--text-tertiary, #999); line-height: 1.5; }
 .import-result { margin-top: 8px; padding: 8px 12px; background: var(--bg-tertiary); border-radius: var(--radius-sm); font-size: 13px; color: var(--text-secondary); }
 .import-result.success { color: #67c23a; background: rgba(103, 194, 58, 0.1); }
 .clean-result { margin-top: 8px; padding: 8px 12px; background: var(--bg-tertiary); border-radius: var(--radius-sm); font-size: 13px; color: var(--text-secondary); }

@@ -1,6 +1,6 @@
 import { app, globalShortcut, Tray, Menu, nativeImage, NativeImage } from 'electron'
-import { getMainWindow, createMainWindow, createSplashWindow, closeSplashWindow } from './window'
-import { registerIpcHandlers } from './ipc'
+import { getMainWindow, createMainWindow } from './window'
+import { registerIpcHandlers, markDbReady } from './ipc'
 import { initDatabase, flushSaveDb } from './database'
 import { join } from 'path'
 import { existsSync, mkdirSync, writeFileSync } from 'fs'
@@ -241,26 +241,43 @@ function createTray() {
 }
 
 app.whenReady().then(async () => {
-  // 立即显示 splash 窗口，让用户知道程序已启动
-  createSplashWindow()
-
-  await initDatabase()
-  registerIpcHandlers()
-  createAppMenu()
+  // 先创建窗口，让 HTML 内嵌 splash 立刻显示，再初始化数据库
+  mainWindow = createMainWindow()
   
   // 设置默认的关闭行为（从 localStorage 读取会在渲染进程中处理）
   // 这里设置一个安全的默认值
   ;(app as any)._closeBehavior = 'quit'
   
-  mainWindow = createMainWindow()
-  
-  // 主窗口准备好后关闭 splash
+  // 跟踪窗口是否已显示和数据库是否已就绪
+  let windowShown = false
+  let dbInitialized = false
+
+  function trySendDbReady() {
+    // 只有窗口已显示且数据库已就绪时才发送 db:ready
+    // 这样确保渲染进程 Vue 已挂载并监听事件
+    if (windowShown && dbInitialized) {
+      setTimeout(() => {
+        mainWindow?.webContents.send('db:ready')
+      }, 100)
+    }
+  }
+
+  // 主窗口准备好后显示（HTML 内嵌 #splash 提供加载体验）
   mainWindow.once('ready-to-show', () => {
-    console.log('[App] Window ready, closing splash and creating tray...')
-    closeSplashWindow()
+    console.log('[App] Window ready, showing main window and creating tray...')
     mainWindow?.show()
     createTray()
+    windowShown = true
+    trySendDbReady()
   })
+
+  // 数据库初始化在窗口创建后进行，不阻塞窗口显示
+  await initDatabase()
+  registerIpcHandlers()
+  createAppMenu()
+  markDbReady()
+  dbInitialized = true
+  trySendDbReady()
 
   globalShortcut.register('CommandOrControl+Shift+F', () => {
     const win = getMainWindow()

@@ -6,3 +6,6 @@ output-*
 *.log
 .DS_Store
 Thumbs.db
+_migrate/
+auto-imports.d.ts
+components.d.ts

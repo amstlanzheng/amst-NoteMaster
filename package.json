@@ -1,0 +1,42 @@
+{
+  "name": "amnote-tauri",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "build:portable": "npm run build && cd src-tauri && cargo build --release && cd .. && node scripts/build-portable.mjs",
+    "build:win": "npm run tauri build"
+  },
+  "dependencies": {
+    "@element-plus/icons-vue": "^2.3.1",
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-sql": "^2",
+    "@tauri-apps/plugin-dialog": "^2",
+    "@tauri-apps/plugin-fs": "^2",
+    "@tauri-apps/plugin-shell": "^2",
+    "@tauri-apps/plugin-process": "^2",
+    "dayjs": "^1.11.13",
+    "echarts": "^6.1.0",
+    "element-plus": "^2.14.1",
+    "highlight.js": "^11.11.1",
+    "jszip": "^3.10.1",
+    "markdown-it": "^14.2.0",
+    "pinia": "^3.0.4",
+    "vue": "^3.5.38",
+    "vue-echarts": "^8.0.1",
+    "vue-router": "^4.5.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2",
+    "@vitejs/plugin-vue": "^6.0.7",
+    "typescript": "^5.7.2",
+    "unplugin-auto-import": "^21.0.0",
+    "unplugin-vue-components": "^32.1.0",
+    "vite": "^7.3.5",
+    "vue-tsc": "^2.2.0"
+  }
+}

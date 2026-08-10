@@ -1,0 +1,78 @@
+<script setup lang="ts">
+import { onMounted } from 'vue'
+import AppSidebar from './AppSidebar.vue'
+import AppTopBar from './AppTopBar.vue'
+import { useNoteStore } from '../../stores/note'
+import { useCategoryStore } from '../../stores/category'
+import { useTagStore } from '../../stores/tag'
+import { useSearchStore } from '../../stores/search'
+
+const noteStore = useNoteStore()
+const categoryStore = useCategoryStore()
+const tagStore = useTagStore()
+const searchStore = useSearchStore()
+
+onMounted(async () => {
+  // 等待主进程数据库初始化完成后再加载数据
+  const api = (window as any).api
+  if (api?.isDbReady) {
+    const ready = await api.isDbReady()
+    if (!ready) {
+      await new Promise<void>((resolve) => {
+        const off = api.onDbReady(() => { off(); resolve() })
+        setTimeout(() => { off(); resolve() }, 5000)
+      })
+    }
+  }
+
+  await Promise.all([
+    noteStore.fetchNotes(),
+    categoryStore.fetchCategories(),
+    tagStore.fetchTags(),
+    searchStore.fetchHistory()
+  ])
+  // 通知 splash 屏幕数据已加载，可以隐藏
+  if ((window as any).__appReady) {
+    ;(window as any).__appReady()
+  }
+})
+</script>
+
+<template>
+  <div class="app-layout">
+    <div class="app-sidebar">
+      <AppSidebar />
+    </div>
+    <div class="app-main">
+      <AppTopBar />
+      <router-view />
+    </div>
+  </div>
+</template>
+
+<style scoped>
+.app-layout {
+  display: flex;
+  height: 100vh;
+  background: var(--bg-primary);
+}
+
+.app-sidebar {
+  width: var(--sidebar-width);
+  min-width: 200px;
+  max-width: 350px;
+  border-right: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+
+.app-main {
+  flex: 1;
+  min-width: 600px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+</style>

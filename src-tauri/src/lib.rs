@@ -5,6 +5,7 @@
 //! 2. 数据库表结构迁移
 //! 3. 注册 Tauri 插件和自定义命令
 
+use tauri::Manager;
 use tauri_plugin_sql::{Builder as SqlBuilder, Migration, MigrationKind};
 use std::fs;
 use std::path::PathBuf;
@@ -180,6 +181,67 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_process::init())
+        // 自定义协议 amnote：为 Markdown 渲染中的本地图片提供数据
+        //
+        // URL 形式（前端 markdown.ts 按平台生成）：
+        // - macOS/Linux: amnote://files/xxx 、amnote://local/<绝对路径>
+        // - Windows:     http://amnote.localhost/files/xxx 、http://amnote.localhost/local/<绝对路径>
+        //   （WebView2 不支持注册自定义 scheme，Tauri 在 Windows 上映射为虚拟主机）
+        .register_uri_scheme_protocol("amnote", |ctx, request| {
+            let not_found = || {
+                tauri::http::Response::builder()
+                    .status(404)
+                    .body(Vec::new())
+                    .unwrap()
+            };
+
+            // 统一剥离协议前缀，得到 "files/xxx" 或 "local/<绝对路径>"
+            let uri = request.uri().to_string();
+            let raw = if let Some(p) = uri.strip_prefix("amnote://") {
+                p
+            } else if let Some(p) = uri.strip_prefix("http://amnote.localhost/") {
+                p
+            } else {
+                return not_found();
+            };
+
+            // percent-decode（中文路径在 URI 中是编码形式）
+            let decoded = percent_encoding::percent_decode_str(raw)
+                .decode_utf8_lossy()
+                .to_string();
+
+            // 拒绝目录穿越
+            if decoded.contains("..") {
+                return not_found();
+            }
+
+            let file_path = if let Some(rest) = decoded.strip_prefix("files/") {
+                // 应用附件：app_data_dir/amnote-data/files/xxx
+                let dir = match ctx.app_handle().path().app_data_dir() {
+                    Ok(d) => d,
+                    Err(_) => return not_found(),
+                };
+                dir.join("amnote-data").join("files").join(rest)
+            } else if let Some(rest) = decoded.strip_prefix("local/") {
+                // 外部绝对路径（非盘符开头视为 Unix 路径，补回根 /）
+                if rest.contains(':') {
+                    std::path::PathBuf::from(rest)
+                } else {
+                    std::path::PathBuf::from(format!("/{}", rest))
+                }
+            } else {
+                return not_found();
+            };
+
+            match std::fs::read(&file_path) {
+                Ok(data) => tauri::http::Response::builder()
+                    .header("Content-Type", file_commands::guess_mime(&file_path.to_string_lossy()))
+                    .header("Access-Control-Allow-Origin", "*")
+                    .body(data)
+                    .unwrap(),
+                Err(_) => not_found(),
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             // 本地文件操作
             file_commands::save_local_file,
@@ -201,10 +263,9 @@ pub fn run() {
             file_commands::create_external_file,
             file_commands::delete_external_dir,
             file_commands::delete_external_file,
-            // 导入（占位）
-            file_commands::import_file,
-            file_commands::import_folder,
-            file_commands::resolve_file_conflict,
+            // 导入
+            file_commands::read_text_file,
+            file_commands::copy_file_to_attachments,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -20,18 +20,16 @@ const ts = [
 const outputDir = join(root, `output-${ts}`)
 
 try {
-  // 检查 exe 是否存在
   const exePath = join(releaseDir, exeName)
-  await copyFile(exePath, join(outputDir, exeName)).catch(() => {
-    console.error(`❌ 未找到 ${exePath}，请先执行 tauri build`)
-    process.exit(1)
-  })
 
-  // 创建输出目录
+  // 创建输出目录（必须先于 copyFile）
   await mkdir(outputDir, { recursive: true })
 
   // 复制 exe
-  await copyFile(exePath, join(outputDir, exeName))
+  await copyFile(exePath, join(outputDir, exeName)).catch(() => {
+    console.error(`❌ 未找到 ${exePath}，请先执行构建`)
+    process.exit(1)
+  })
   const sizeMB = (await import('fs')).statSync(join(outputDir, exeName)).size / (1024 * 1024)
 
   console.log(`\n✅ 免安装包已生成：`)

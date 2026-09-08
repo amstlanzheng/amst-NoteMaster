@@ -55,6 +55,17 @@ md.renderer.rules.link_open = function (tokens, idx, options, env, self) {
 // 自定义图片渲染：路径协议转换
 // ============================================================
 
+/**
+ * amnote 协议 URL 前缀（按平台区分）
+ *
+ * Windows 的 WebView2 不支持注册自定义 scheme，Tauri 将自定义协议映射为
+ * `http://<scheme>.localhost/` 虚拟主机；macOS/Linux 使用原生 `amnote://` 形式。
+ * 两种形式都会被 lib.rs 中的 register_uri_scheme_protocol 拦截处理。
+ */
+const SCHEME_BASE = /windows/i.test(navigator.userAgent)
+  ? 'http://amnote.localhost/'
+  : 'amnote://'
+
 /** 判断 src 是否为远程/内联路径（不需要协议转换） */
 function isRemoteSrc(src: string): boolean {
   return src.startsWith('http://') ||
@@ -97,13 +108,13 @@ md.renderer.rules.image = function (tokens, idx, options, env, self) {
     const src = token.attrs![srcIndex][1]
 
     if (src.startsWith('amnote-data/files/')) {
-      // 内部附件路径 → amnote://files/ 协议
+      // 内部附件路径 → amnote 协议（files 命名空间）
       const relativePath = src.replace('amnote-data/files/', '')
-      token.attrs![srcIndex][1] = `amnote://files/${relativePath}`
+      token.attrs![srcIndex][1] = `${SCHEME_BASE}files/${relativePath}`
     } else if (currentBaseDir && !isRemoteSrc(src)) {
-      // 外部文件相对/绝对路径 → amnote://local/ 协议
+      // 外部文件相对/绝对路径 → amnote 协议（local 命名空间）
       const resolvedPath = resolvePath(src, currentBaseDir)
-      token.attrs![srcIndex][1] = `amnote://local/${resolvedPath.replace(/^\//, '')}`
+      token.attrs![srcIndex][1] = `${SCHEME_BASE}local/${resolvedPath.replace(/^\//, '')}`
     }
   }
 

@@ -165,6 +165,7 @@ async function handleExternalFileDrop(filePath: string, categoryId: number) {
       'drag-over': dragOverCatId === category.id
     }"
     :style="{ paddingLeft: (12 + depth * 20) + 'px' }"
+    :data-category-id="category.id"
     draggable="true"
     @click="selectCategory(category.id)"
     @contextmenu="handleContextMenu($event, category)"

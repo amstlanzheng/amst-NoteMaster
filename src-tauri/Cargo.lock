@@ -54,6 +54,7 @@ name = "amnote-tauri"
 version = "1.0.0"
 dependencies = [
  "chrono",
+ "percent-encoding",
  "serde",
  "serde_json",
  "tauri",

@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useCategoryStore } from '../../stores/category'
 import { useNoteStore } from '../../stores/note'
 import { useTagStore } from '../../stores/tag'
@@ -32,6 +33,8 @@ const catContextMenu = ref({ visible: false, x: 0, y: 0, cat: null as Category |
 const tagContextMenu = ref({ visible: false, x: 0, y: 0, tag: null as { id: number; name: string; color: string } | null })
 const dragOverCatId = ref<number | null>(null)
 const dragCatId = ref<number | null>(null)
+// Tauri 窗口级拖拽事件解绑函数
+let unlistenDragDrop: (() => void) | null = null
 
 // 外部文件相关
 interface ExternalFile {
@@ -699,10 +702,62 @@ onMounted(async () => {
   window.api.onMenuViewStats(() => {
     router.push('/stats')
   })
+
+  // Tauri 窗口级文件拖拽：OS 文件拖入时 HTML5 File 对象没有 path 属性（Electron 特性），
+  // 必须通过 Tauri dragDropEvent 获取真实路径，再按落点坐标命中目标分类
+  unlistenDragDrop = await getCurrentWindow().onDragDropEvent(async (event) => {
+    const payload = event.payload
+    const scale = window.devicePixelRatio || 1
+
+    if (payload.type === 'over') {
+      // 拖拽悬停：高亮命中的分类
+      const el = document.elementFromPoint(payload.position.x / scale, payload.position.y / scale)
+      const catEl = el?.closest('[data-category-id]')
+      dragOverCatId.value = catEl ? Number(catEl.getAttribute('data-category-id')) : null
+      return
+    }
+
+    if (payload.type === 'leave') {
+      dragOverCatId.value = null
+      return
+    }
+
+    if (payload.type === 'drop') {
+      const el = document.elementFromPoint(payload.position.x / scale, payload.position.y / scale)
+      const catEl = el?.closest('[data-category-id]')
+      dragOverCatId.value = null
+      const catId = catEl ? Number(catEl.getAttribute('data-category-id')) : categoryStore.selectedCategoryId
+      if (catId == null) {
+        ElMessage.warning('请将文件拖拽到目标分类上')
+        return
+      }
+
+      let imported = 0
+      let failed = 0
+      for (const path of payload.paths) {
+        try {
+          const result = await window.api.importFile(path, catId)
+          if (result.success) imported++
+          else failed++
+        } catch {
+          failed++
+        }
+      }
+      noteStore.fetchNotes()
+      categoryStore.fetchCategories()
+      if (failed === 0) {
+        ElMessage.success(`已导入 ${imported} 个文件`)
+      } else {
+        ElMessage.warning(`导入完成：成功 ${imported} 个，失败 ${failed} 个`)
+      }
+    }
+  })
 })
 
 onUnmounted(() => {
   window.removeEventListener('external-files-changed', loadExternalFiles)
+  unlistenDragDrop?.()
+  unlistenDragDrop = null
 })
 
 // 加载外部文件列表

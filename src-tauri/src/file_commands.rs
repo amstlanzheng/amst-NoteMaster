@@ -126,8 +126,9 @@ pub fn save_local_file(app: AppHandle, buffer: Vec<u8>, filename: String, note_i
 // 文件信息与扫描
 // ============================================================
 
-/// 文件元信息
+/// 文件元信息（序列化为 camelCase，与前端 FileInfo 接口对齐）
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct FileInfo {
     pub filename: String,
     pub size: u64,
@@ -196,19 +197,28 @@ pub fn get_file_path(app: AppHandle, filename: String) -> String {
 /// 读取文件为 Base64，返回 `{ base64: "data:mime;base64,...", error?: string }`
 ///
 /// base64 字段包含完整 data URI，可直接用于 `<img src>` 或文本解码。
+/// 支持 `amnote-data/files/xxx` 相对路径（自动解析到应用数据目录）。
 #[tauri::command]
-pub fn read_file_as_base64(file_path: String) -> serde_json::Value {
-    let data = match fs::read(&file_path) {
+pub fn read_file_as_base64(app: AppHandle, file_path: String) -> serde_json::Value {
+    // 相对路径 amnote-data/files/xxx → 应用数据目录绝对路径
+    let resolved = if file_path.starts_with("amnote-data/") {
+        let dir = app.path().app_data_dir().expect("failed to get app data dir");
+        dir.join(&file_path).to_string_lossy().to_string()
+    } else {
+        file_path.clone()
+    };
+
+    let data = match fs::read(&resolved) {
         Ok(d) => d,
         Err(e) => return serde_json::json!({ "error": e.to_string() }),
     };
     let b64 = base64_encode(&data);
-    let mime = guess_mime(&file_path);
+    let mime = guess_mime(&resolved);
     serde_json::json!({ "base64": format!("data:{};base64,{}", mime, b64) })
 }
 
 /// 根据文件扩展名猜测 MIME 类型
-fn guess_mime(path: &str) -> &'static str {
+pub(crate) fn guess_mime(path: &str) -> &'static str {
     let ext = std::path::Path::new(path)
         .extension()
         .and_then(|e| e.to_str())
@@ -256,14 +266,17 @@ fn guess_mime(path: &str) -> &'static str {
 // 文件删除 / 清理
 // ============================================================
 
-/// 删除应用数据目录下的指定文件
+/// 删除应用数据目录下的指定文件，返回 `{ success: bool, message?: string }`
 #[tauri::command]
-pub fn delete_file(app: AppHandle, filename: String) -> Result<(), String> {
+pub fn delete_file(app: AppHandle, filename: String) -> serde_json::Value {
     let file_path = files_dir(&app).join(&filename);
-    if file_path.exists() {
-        fs::remove_file(&file_path).map_err(|e| e.to_string())?;
+    if !file_path.exists() {
+        return serde_json::json!({ "success": true }); // 文件不存在视为成功（幂等）
     }
-    Ok(())
+    match fs::remove_file(&file_path) {
+        Ok(_) => serde_json::json!({ "success": true }),
+        Err(e) => serde_json::json!({ "success": false, "message": e.to_string() }),
+    }
 }
 
 /// 清理未使用的文件（简化版，暂不实现）
@@ -447,25 +460,55 @@ pub fn delete_external_file(file_path: String) -> Result<(), String> {
 }
 
 // ============================================================
-// 导入（占位，暂未实现）
+// 导入
 // ============================================================
 
-/// 导入文件（占位）
+/// 读取文本文件内容，返回 `{ content?: string, error?: string }`
+///
+/// 用于导入外部文本文件（md/txt/html 等）创建笔记，限制 10MB。
 #[tauri::command]
-pub fn import_file(_file_path: String, _category_id: Option<i64>) -> serde_json::Value {
-    serde_json::json!({ "success": false, "message": "暂未实现" })
+pub fn read_text_file(file_path: String) -> serde_json::Value {
+    const MAX_SIZE: u64 = 10 * 1024 * 1024; // 10MB
+
+    let meta = match fs::metadata(&file_path) {
+        Ok(m) => m,
+        Err(e) => return serde_json::json!({ "error": format!("无法访问文件: {}", e) }),
+    };
+    if meta.len() > MAX_SIZE {
+        return serde_json::json!({ "error": "文件超过 10MB 限制" });
+    }
+
+    match fs::read_to_string(&file_path) {
+        Ok(content) => serde_json::json!({ "content": content }),
+        Err(_) => serde_json::json!({ "error": "文件不是有效的 UTF-8 文本" }),
+    }
 }
 
-/// 导入文件夹（占位）
+/// 复制外部文件到应用附件目录（amnote-data/files/）
+///
+/// 返回 `{ success, filename?, conflict?, error? }`：
+/// - 同名文件已存在且 overwrite=false → `{ conflict: true, filename }`
+/// - 复制成功 → `{ success: true, filename }`
 #[tauri::command]
-pub fn import_folder(_folder_path: String, _category_id: Option<i64>) -> serde_json::Value {
-    serde_json::json!({ "success": false, "message": "暂未实现" })
-}
+pub fn copy_file_to_attachments(app: AppHandle, source_path: String, overwrite: bool) -> serde_json::Value {
+    let src = std::path::Path::new(&source_path);
+    if !src.is_file() {
+        return serde_json::json!({ "error": "源文件不存在" });
+    }
 
-/// 解决文件冲突（占位）
-#[tauri::command]
-pub fn resolve_file_conflict(_data: serde_json::Value) -> serde_json::Value {
-    serde_json::json!({ "success": false, "message": "暂未实现" })
+    let filename = src.file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "unnamed".to_string());
+    let dest = files_dir(&app).join(&filename);
+
+    if dest.exists() && !overwrite {
+        return serde_json::json!({ "conflict": true, "filename": filename });
+    }
+
+    match fs::copy(src, &dest) {
+        Ok(_) => serde_json::json!({ "success": true, "filename": filename }),
+        Err(e) => serde_json::json!({ "error": format!("复制失败: {}", e) }),
+    }
 }
 
 // ============================================================

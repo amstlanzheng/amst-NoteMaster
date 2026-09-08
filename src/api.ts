@@ -594,8 +594,80 @@ async function previewUnusedFiles(): Promise<any> {
   return invoke('preview_unused_files')
 }
 
-async function getAllFiles(): Promise<any[]> {
-  return invoke('get_all_files')
+/** 格式化字节大小（B / KB / MB / GB） */
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`
+}
+
+/**
+ * 获取文件空间数据
+ *
+ * Rust 端负责扫描应用数据目录下的文件列表；
+ * 引用关系（referenced / directCategoryId）在此通过查询笔记内容组装：
+ * - referenced：任一未删除笔记的 content 中包含该文件名
+ * - directCategoryId：第一条引用该文件的笔记所属分类
+ *
+ * @returns `{ categories, allFiles, totalCount, totalSize, totalSizeFormatted }`
+ */
+async function getAllFiles(): Promise<any> {
+  const files = await invoke<any[]>('get_all_files')
+
+  // 查询所有未删除笔记的内容与分类，用于判断文件引用关系
+  const notes = await getAll<{ content: string; category_id: number | null }>(
+    'SELECT content, category_id FROM notes WHERE is_deleted = 0'
+  )
+
+  // 为每个文件标记引用状态
+  const allFiles = files.map((f: any) => {
+    const refNote = notes.find(n => n.content && n.content.includes(f.filename))
+    return {
+      filename: f.filename,
+      size: f.size,
+      sizeFormatted: f.sizeFormatted,
+      modifiedTime: f.modifiedTime,
+      referenced: !!refNote,
+      directCategoryId: refNote?.category_id ?? null
+    }
+  })
+
+  // 按分类聚合统计（仅统计直接引用该分类笔记的文件）
+  const catMap = new Map<number, { count: number; size: number }>()
+  for (const f of allFiles) {
+    if (f.directCategoryId != null) {
+      const entry = catMap.get(f.directCategoryId) || { count: 0, size: 0 }
+      entry.count++
+      entry.size += f.size
+      catMap.set(f.directCategoryId, entry)
+    }
+  }
+  const catRows = await getAll<{ id: number; parent_id: number | null; name: string; sort_order: number }>(
+    'SELECT id, parent_id, name, sort_order FROM categories ORDER BY sort_order'
+  )
+  const categories = catRows.map(c => {
+    const stat = catMap.get(c.id) || { count: 0, size: 0 }
+    return {
+      id: c.id,
+      parent_id: c.parent_id,
+      name: c.name,
+      sort_order: c.sort_order,
+      directFileCount: stat.count,
+      directFileSize: stat.size,
+      directFileSizeFormatted: formatBytes(stat.size),
+      childCategoryCount: catRows.filter(x => x.parent_id === c.id).length
+    }
+  })
+
+  const totalSize = allFiles.reduce((sum, f) => sum + f.size, 0)
+  return {
+    categories,
+    allFiles,
+    totalCount: allFiles.length,
+    totalSize,
+    totalSizeFormatted: formatBytes(totalSize)
+  }
 }
 
 async function getFilePath(filename: string): Promise<string> {
@@ -606,24 +678,118 @@ async function readFileAsBase64(filePath: string): Promise<any> {
   return invoke('read_file_as_base64', { filePath })
 }
 
-async function deleteFile(filename: string): Promise<void> {
+/** 删除应用数据目录下的文件，返回 `{ success, message? }` */
+async function deleteFile(filename: string): Promise<any> {
   return invoke('delete_file', { filename })
 }
 
+/**
+ * 清理未被任何笔记引用的文件
+ * 前端组装：扫描文件 → 筛选未引用 → 逐个删除 → 返回统计
+ *
+ * @returns `{ deletedCount, freedSize, totalSizeFormatted }`
+ */
 async function cleanUnusedFiles(): Promise<any> {
-  return invoke('clean_unused_files')
+  const data = await getAllFiles()
+  const unused = (data.allFiles as any[]).filter(f => !f.referenced)
+  let deletedCount = 0
+  let freedSize = 0
+  for (const f of unused) {
+    const result: any = await invoke('delete_file', { filename: f.filename })
+    if (result?.success) {
+      deletedCount++
+      freedSize += f.size
+    }
+  }
+  return { deletedCount, freedSize, totalSizeFormatted: formatBytes(freedSize) }
 }
 
+// ============================================================
+// 文件导入（前端组装：Rust 读文件/复制附件 + SQL 创建笔记）
+// ============================================================
+
+/** 图片扩展名（导入时复制到附件目录，不创建笔记） */
+const IMPORT_IMAGE_EXTS = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'ico']
+
+/**
+ * 导入单个外部文件
+ *
+ * - 图片：复制到应用附件目录 `amnote-data/files/`，同名冲突时返回 conflict
+ * - 文本（md/txt/html 等）：读取内容并创建笔记（标题=文件名去扩展名）
+ *
+ * @returns `{ success, isImage?, conflict?, filename?, originalPath?, noteId?, error? }`
+ */
 async function importFile(filePath: string, categoryId: number | null = null): Promise<any> {
-  return invoke('import_file', { filePath, categoryId })
+  const filename = filePath.split(/[\\/]/).pop() || 'unknown'
+  const ext = filename.includes('.') ? filename.split('.').pop()!.toLowerCase() : ''
+
+  // 图片：复制到附件目录
+  if (IMPORT_IMAGE_EXTS.includes(ext)) {
+    const result: any = await invoke('copy_file_to_attachments', { sourcePath: filePath, overwrite: false })
+    if (result.conflict) {
+      return { success: false, conflict: true, filename, originalPath: filePath, isImage: true }
+    }
+    if (result.success) {
+      return { success: true, isImage: true, filename: result.filename }
+    }
+    return { success: false, error: result.error || '复制失败' }
+  }
+
+  // 文本：读取内容创建笔记
+  const read: any = await invoke('read_text_file', { filePath })
+  if (read.error) {
+    return { success: false, error: read.error }
+  }
+  const title = filename.replace(/\.[^.]+$/, '')
+  const noteId = await createNote({
+    title,
+    content: read.content,
+    content_type: ext === 'html' || ext === 'htm' ? 'html' : 'markdown',
+    category_id: categoryId
+  })
+  return { success: true, isImage: false, noteId, filename }
 }
 
+/**
+ * 导入文件夹（仅第一层文件，跳过子目录与隐藏文件）
+ * @returns `{ success, imported, failed, message }`
+ */
 async function importFolder(folderPath: string, categoryId: number | null = null): Promise<any> {
-  return invoke('import_folder', { folderPath, categoryId })
+  const scan: any = await invoke('scan_external_dirs', { parentPath: folderPath })
+  if (!scan.success) {
+    return { success: false, imported: 0, failed: 0, message: scan.error || '扫描文件夹失败' }
+  }
+
+  // scan_external_dirs 树形结构中，第一个虚拟节点 "(文件)" 包含当前目录文件
+  const filesNode = (scan.tree as any[]).find(n => n.name === '(文件)')
+  const files: any[] = filesNode?.files || []
+
+  let imported = 0
+  let failed = 0
+  for (const f of files) {
+    const result = await importFile(f.path, categoryId)
+    if (result.success) imported++
+    else failed++
+  }
+  return { success: true, imported, failed, message: `导入完成：成功 ${imported} 个，失败 ${failed} 个` }
 }
 
-async function resolveFileConflict(data: any): Promise<any> {
-  return invoke('resolve_file_conflict', data)
+/**
+ * 解决导入冲突（目前仅图片附件存在冲突场景）
+ * @param data.action  'overwrite' 覆盖 | 'skip' 跳过
+ */
+async function resolveFileConflict(data: { action: string; originalPath: string; filename: string; categoryId: number | null }): Promise<any> {
+  if (data.action === 'skip') {
+    return { success: true, skipped: true }
+  }
+  if (data.action === 'overwrite') {
+    const result: any = await invoke('copy_file_to_attachments', { sourcePath: data.originalPath, overwrite: true })
+    if (result.success) {
+      return { success: true, filename: result.filename }
+    }
+    return { success: false, error: result.error || '覆盖失败' }
+  }
+  return { success: false, error: `未知操作: ${data.action}` }
 }
 
 async function setCurrentViewingPath(path: string | null): Promise<any> {

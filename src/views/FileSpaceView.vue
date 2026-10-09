@@ -71,7 +71,7 @@ async function loadData() {
 
 function previewImage(file: FileInfo) {
   const ext = file.filename.split('.').pop()?.toLowerCase() || ''
-  const imageExts = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg']
+  const imageExts = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'ico']
   if (imageExts.includes(ext)) {
     window.api.readFileAsBase64(`amnote-data/files/${file.filename}`).then((result: any) => {
       if (result.base64) {

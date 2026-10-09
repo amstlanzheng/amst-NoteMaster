@@ -354,8 +354,8 @@ async function handlePasteImage(event: ClipboardEvent) {
       const blob = item.getAsFile()
       if (!blob) continue
       
-      // 获取当前图片存储模式
-      const storageMode = localStorage.getItem('amnote-image-storage-mode') || 'base64'
+      // 获取当前图片存储模式（未设置时默认文件夹存储，与设置页默认一致）
+      const storageMode = localStorage.getItem('amnote-image-storage-mode') || 'folder'
       
       // MinIO 模式允许 10MB，其他模式 1MB
       const maxSize = storageMode === 'minio' ? 10 * 1024 * 1024 : 1024 * 1024

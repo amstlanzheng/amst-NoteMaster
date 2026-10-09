@@ -195,15 +195,18 @@ pub fn run() {
                     .unwrap()
             };
 
-            // 统一剥离协议前缀，得到 "files/xxx" 或 "local/<绝对路径>"
-            let uri = request.uri().to_string();
-            let raw = if let Some(p) = uri.strip_prefix("amnote://") {
-                p
-            } else if let Some(p) = uri.strip_prefix("http://amnote.localhost/") {
-                p
+            // 结构化解析 URI，不依赖 host 字符串精确匹配，兼容两种形式：
+            // - Windows WebView2 实际发送: amnote://localhost/files/xxx → host = localhost，path = /files/xxx
+            // - macOS/Linux 原生 scheme: amnote://files/xxx → host = files，path = /xxx
+            let uri = request.uri();
+            eprintln!("[amnote] request uri: {}", uri);
+            let raw = if uri.scheme_str() == Some("amnote") {
+                format!("{}{}", uri.host().unwrap_or_default(), uri.path())
             } else {
-                return not_found();
+                uri.path().trim_start_matches('/').to_string()
             };
+            // 剥离 WebView2 映射产生的 localhost/ 前缀
+            let raw = raw.strip_prefix("localhost/").unwrap_or(&raw);
 
             // percent-decode（中文路径在 URI 中是编码形式）
             let decoded = percent_encoding::percent_decode_str(raw)
@@ -239,7 +242,14 @@ pub fn run() {
                     .header("Access-Control-Allow-Origin", "*")
                     .body(data)
                     .unwrap(),
-                Err(_) => not_found(),
+                Err(e) => {
+                    eprintln!(
+                        "[amnote] read failed: {} ({})",
+                        file_path.display(),
+                        e
+                    );
+                    not_found()
+                }
             }
         })
         .invoke_handler(tauri::generate_handler![

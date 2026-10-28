@@ -11,6 +11,7 @@ export const useUiStore = defineStore('ui', () => {
   const isDarkMode = ref(false)
   const searchDialogVisible = ref(false)
   const showFolderCount = ref(true) // 是否显示文件夹内文件数量
+  const showFilesInCategory = ref(true) // 分类树下是否显示其下的文件（笔记）
   const noteSortBy = ref<SortBy>('updated_at')
   const noteSortOrder = ref<SortOrder>('desc')
   const noteViewMode = ref<NoteViewMode>('summary')
@@ -22,6 +23,7 @@ export const useUiStore = defineStore('ui', () => {
       if (saved) {
         const cfg = JSON.parse(saved)
         if (cfg.showFolderCount !== undefined) showFolderCount.value = cfg.showFolderCount
+        if (cfg.showFilesInCategory !== undefined) showFilesInCategory.value = cfg.showFilesInCategory
         if (cfg.noteSortBy !== undefined) noteSortBy.value = cfg.noteSortBy
         if (cfg.noteSortOrder !== undefined) noteSortOrder.value = cfg.noteSortOrder
         if (cfg.noteViewMode !== undefined) noteViewMode.value = cfg.noteViewMode
@@ -30,10 +32,11 @@ export const useUiStore = defineStore('ui', () => {
   }
 
   // 监听设置变化并保存
-  watch([showFolderCount, noteSortBy, noteSortOrder, noteViewMode], () => {
+  watch([showFolderCount, showFilesInCategory, noteSortBy, noteSortOrder, noteViewMode], () => {
     try {
       const saved = JSON.parse(localStorage.getItem('amnote-ui-settings') || '{}')
       saved.showFolderCount = showFolderCount.value
+      saved.showFilesInCategory = showFilesInCategory.value
       saved.noteSortBy = noteSortBy.value
       saved.noteSortOrder = noteSortOrder.value
       saved.noteViewMode = noteViewMode.value
@@ -55,7 +58,7 @@ export const useUiStore = defineStore('ui', () => {
   }
 
   return {
-    sidebarWidth, listWidth, isDarkMode, searchDialogVisible, showFolderCount,
+    sidebarWidth, listWidth, isDarkMode, searchDialogVisible, showFolderCount, showFilesInCategory,
     noteSortBy, noteSortOrder, noteViewMode,
     toggleDarkMode, openSearchDialog, closeSearchDialog, loadSettings
   }

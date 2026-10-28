@@ -11,6 +11,7 @@ use std::fs;
 use std::path::PathBuf;
 
 mod file_commands;
+mod ai_commands;
 
 // ============================================================
 // Electron → Tauri 数据迁移
@@ -178,8 +179,6 @@ pub fn run() {
                 .build(),
         )
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_fs::init())
-        .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_process::init())
         // 自定义协议 amnote：为 Markdown 渲染中的本地图片提供数据
         //
@@ -273,9 +272,16 @@ pub fn run() {
             file_commands::create_external_file,
             file_commands::delete_external_dir,
             file_commands::delete_external_file,
+            file_commands::save_external_text,
+            file_commands::rename_external_path,
+            file_commands::move_external_path,
             // 导入
             file_commands::read_text_file,
             file_commands::copy_file_to_attachments,
+            // AI 助手
+            ai_commands::ai_chat_stream,
+            ai_commands::ai_abort_stream,
+            ai_commands::ai_test_connection,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

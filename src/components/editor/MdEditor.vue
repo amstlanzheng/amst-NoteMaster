@@ -528,9 +528,9 @@ function removeImage(img: Base64Image) {
         <el-button size="small" @click="insertMarkdown('italic')"><i>I</i></el-button>
         <el-button size="small" @click="insertMarkdown('code')">&lt;/&gt;</el-button>
         <el-button size="small" @click="insertMarkdown('quote')">&ldquo;</el-button>
-        <el-button size="small" @click="insertMarkdown('list')">•</el-button>
-        <el-button size="small" @click="insertMarkdown('link')">🔗</el-button>
-        <el-button size="small" @click="insertMarkdown('table')">⊞</el-button>
+        <el-button size="small" @click="insertMarkdown('list')" title="无序列表">•</el-button>
+        <el-button size="small" @click="insertMarkdown('link')" title="插入链接"><el-icon><Link /></el-icon></el-button>
+        <el-button size="small" @click="insertMarkdown('table')" title="插入表格">⊞</el-button>
       </div>
       <div class="toolbar-right">
         <el-select v-model="contentType" size="small" style="width:100px">
@@ -555,18 +555,30 @@ function removeImage(img: Base64Image) {
           图片 {{ base64Images.length > 0 ? `(${base64Images.length})` : '' }}
         </el-button>
         <el-button size="small" @click="scrollToTop" title="回到顶部">
-          <el-icon><Top /></el-icon>
+          <el-icon><CaretTop /></el-icon>
         </el-button>
         <el-button size="small" @click="scrollToBottom" title="到底部">
-          <el-icon><Bottom /></el-icon>
+          <el-icon><CaretBottom /></el-icon>
         </el-button>
-        <el-button size="small" @click="showTagDialog">标签</el-button>
+        <el-button size="small" @click="showTagDialog" title="管理标签">
+          <el-icon><PriceTag /></el-icon><span class="tb-text">标签</span>
+        </el-button>
         <el-button size="small" :type="noteStore.currentNote.is_favorite ? 'warning' : 'default'"
-          @click="toggleFavorite">⭐</el-button>
+          :title="noteStore.currentNote.is_favorite ? '取消收藏' : '收藏笔记'"
+          @click="toggleFavorite">
+          <el-icon><component :is="noteStore.currentNote.is_favorite ? 'StarFilled' : 'Star'" /></el-icon>
+        </el-button>
         <el-button size="small" :type="noteStore.currentNote.is_pinned ? 'primary' : 'default'"
-          @click="togglePin">📌</el-button>
-        <el-button size="small" @click="handleDuplicate">复制</el-button>
-        <el-button size="small" type="danger" @click="handleDelete">删除</el-button>
+          :title="noteStore.currentNote.is_pinned ? '取消置顶' : '置顶笔记'"
+          @click="togglePin">
+          <el-icon><Top /></el-icon>
+        </el-button>
+        <el-button size="small" @click="handleDuplicate" title="复制笔记">
+          <el-icon><CopyDocument /></el-icon><span class="tb-text">复制</span>
+        </el-button>
+        <el-button size="small" type="danger" @click="handleDelete" title="删除笔记">
+          <el-icon><Delete /></el-icon><span class="tb-text">删除</span>
+        </el-button>
       </div>
     </div>
 

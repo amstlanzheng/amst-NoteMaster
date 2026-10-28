@@ -5,17 +5,21 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useCategoryStore } from '../../stores/category'
 import { useNoteStore } from '../../stores/note'
+import { useNoteTreeStore } from '../../stores/noteTree'
 import { useTagStore } from '../../stores/tag'
 import { useUiStore } from '../../stores/ui'
 import { useSearchStore } from '../../stores/search'
+import { useCategoryContextMenu } from '../../composables/useCategoryContextMenu'
 import CategoryTreeItem from './CategoryTreeItem.vue'
 import ExternalFileTree from './ExternalFileTree.vue'
-import type { Category } from '@shared/types'
+import CategoryContextMenu from '../common/CategoryContextMenu.vue'
+import type { Category, Note } from '@shared/types'
 
 const router = useRouter()
 const route = useRoute()
 const categoryStore = useCategoryStore()
 const noteStore = useNoteStore()
+const noteTreeStore = useNoteTreeStore()
 const tagStore = useTagStore()
 const uiStore = useUiStore()
 const searchStore = useSearchStore()
@@ -29,7 +33,8 @@ const expandedYear = ref<number | null>(null)
 const searchKeyword = ref('')
 const showAddCatInput = ref(false)
 const newCatName = ref('')
-const catContextMenu = ref({ visible: false, x: 0, y: 0, cat: null as Category | null })
+// 分类右键菜单（与中间列表子文件夹共用同一逻辑）
+const catMenu = useCategoryContextMenu()
 const tagContextMenu = ref({ visible: false, x: 0, y: 0, tag: null as { id: number; name: string; color: string } | null })
 const dragOverCatId = ref<number | null>(null)
 const dragCatId = ref<number | null>(null)
@@ -70,12 +75,12 @@ const currentViewingPath = ref<string>('') // 当前查看的文件夹路径
 // 布局调整相关 - 已移除拖拽调整，改为固定布局 + 底部可折叠
 
 const menuItems = [
-  { path: '/', name: 'home', icon: 'Document', label: '全部笔记' },
+  { path: '/', name: 'home', icon: 'Notebook', label: '全部笔记' },
   { path: '/favorites', name: 'favorites', icon: 'Star', label: '收藏笔记' },
-  { path: '/files', name: 'files', icon: 'FolderOpened', label: '文件空间' },
+  { path: '/files', name: 'files', icon: 'Files', label: '文件空间' },
   { path: '/tags', name: 'tags', icon: 'CollectionTag', label: '标签管理' },
   { path: '/stats', name: 'stats', icon: 'DataAnalysis', label: '数据统计' },
-  { path: '/trash', name: 'trash', icon: 'Delete', label: '回收站' },
+  { path: '/trash', name: 'trash', icon: 'DeleteFilled', label: '回收站' },
   { path: '/settings', name: 'settings', icon: 'Setting', label: '设置' }
 ]
 
@@ -84,12 +89,35 @@ function navigate(path: string) {
   noteStore.clearFilters()
 }
 
+// 进入 AI 助手
+function goAiAssistant() {
+  router.push('/ai-assistant')
+}
+
 function selectCategory(catId: number | null) {
   currentCategoryId.value = catId
   categoryStore.selectCategory(catId)
   noteStore.currentNote = null
   noteStore.setFilters({ category_id: catId })
   router.push('/')
+}
+
+// 从分类树内打开文件（笔记）：加载完整笔记内容到编辑器
+async function openNoteFromTree(note: Note) {
+  if (note.category_id != null && categoryStore.selectedCategoryId !== note.category_id) {
+    categoryStore.selectCategory(note.category_id)
+    noteStore.setFilters({ category_id: note.category_id })
+  }
+  await noteStore.fetchNote(note.id)
+  router.push('/')
+}
+
+// 树数据变更（新建/重命名/删除/导入）后刷新分类与文件树
+async function refreshTreeData() {
+  await Promise.all([
+    categoryStore.fetchCategories(),
+    noteTreeStore.fetchTreeNotes(true)
+  ])
 }
 
 function selectTag(tagId: number) {
@@ -154,308 +182,6 @@ async function handleAddRootCategory() {
   newCatName.value = ''
   await categoryStore.fetchCategories()
   ElMessage.success('分类已创建')
-}
-
-function handleCatContextMenu(event: MouseEvent, cat: Category) {
-  event.preventDefault()
-  event.stopPropagation()
-  catContextMenu.value = { visible: true, x: event.clientX, y: event.clientY, cat }
-  setTimeout(() => { document.addEventListener('click', closeCatMenu, { once: true }) }, 0)
-}
-
-function closeCatMenu() {
-  catContextMenu.value.visible = false
-}
-
-async function catMenuNewSub() {
-  const cat = catContextMenu.value.cat
-  if (!cat) return
-  closeCatMenu()
-  try {
-    const { value } = await ElMessageBox.prompt('子文件夹名称', '新建子文件夹', { confirmButtonText: '创建', cancelButtonText: '取消' })
-    if (value?.trim()) {
-      try { await window.api.createSubCategory(cat.id, value.trim()) } catch { /* mock */ }
-      await categoryStore.fetchCategories()
-      ElMessage.success('子文件夹已创建')
-    }
-  } catch { /* cancel */ }
-}
-
-async function catMenuRename() {
-  const cat = catContextMenu.value.cat
-  if (!cat) return
-  closeCatMenu()
-  try {
-    const { value } = await ElMessageBox.prompt('新的分类名称', '重命名', { confirmButtonText: '确定', cancelButtonText: '取消', inputValue: cat.name })
-    if (value?.trim()) {
-      try { await window.api.renameCategory(cat.id, value.trim()) } catch { /* mock */ }
-      await categoryStore.fetchCategories()
-      ElMessage.success('已重命名')
-    }
-  } catch { /* cancel */ }
-}
-
-async function catMenuToggleFavorite() {
-  const cat = catContextMenu.value.cat
-  if (!cat) return
-  closeCatMenu()
-  try { await window.api.toggleCategoryFavorite(cat.id) } catch { /* mock */ }
-  await categoryStore.fetchCategories()
-  await categoryStore.fetchFavorites()
-}
-
-async function catMenuExport() {
-  const cat = catContextMenu.value.cat
-  if (!cat) return
-  closeCatMenu()
-  
-  console.log('[Export] Starting export for category:', cat.name, 'id:', cat.id)
-  
-  try {
-    // 显示确认对话框
-    await ElMessageBox.confirm(
-      `将导出分类「${cat.name}」及其所有笔记和图片到 ZIP 压缩包中。`,
-      '导出分类',
-      {
-        confirmButtonText: '开始导出',
-        cancelButtonText: '取消',
-        type: 'info'
-      }
-    )
-    
-    // 显示进度对话框
-    let progressMsg: any = null
-    
-    const handleProgress = (data: { current: number; total: number; status: string }) => {
-      console.log('[Export] Progress:', data)
-      if (!progressMsg) {
-        progressMsg = ElMessage({
-          message: `正在导出 ${cat.name}...`,
-          type: 'info',
-          duration: 0
-        })
-      }
-      if (data.status === 'complete') {
-        progressMsg.close()
-        cleanup()
-      } else {
-        progressMsg.message = `正在导出 ${cat.name}... (${data.current}/${data.total})`
-      }
-    }
-    
-    const cleanup = window.api.onExportProgress(handleProgress)
-    
-    try {
-      console.log('[Export] Calling exportCategoryFolder API...')
-      const result = await window.api.exportCategoryFolder(cat.id)
-      console.log('[Export Folder] API result:', JSON.stringify(result, null, 2))
-      
-      if (result && result.notes && result.notes.length > 0) {
-        console.log('[Export Folder] Notes count:', result.notes.length, 'Images count:', result.images?.length || 0)
-        await exportAsFolder(result.title, result.notes, result.images || [])
-      } else {
-        console.error('[Export Folder] No notes in result:', result)
-        const noteCount = result?.notes?.length || 0
-        ElMessage.warning(`该分类下没有找到笔记（共 ${noteCount} 篇）`)
-      }
-    } finally {
-      cleanup()
-    }
-  } catch (error) {
-    console.error('[Export] Error:', error)
-    if (error !== 'cancel') {
-      ElMessage.error('导出失败：' + (error as Error).message)
-    }
-  }
-}
-
-async function exportAsZipWithFolders(folderName: string, notes: Array<{ filename: string; content: string; categoryPath?: string }>) {
-  console.log('[Export ZIP] Starting ZIP export, notes count:', notes.length)
-  
-  try {
-    // 尝试从本地导入 JSZip
-    let JSZip: any
-    
-    try {
-      console.log('[Export ZIP] Trying to import JSZip from local...')
-      const jszipModule = await import('jszip')
-      JSZip = jszipModule.default || jszipModule
-      console.log('[Export ZIP] JSZip loaded from local')
-    } catch (importError) {
-      console.warn('[Export ZIP] Local import failed, trying CDN...', importError)
-      // 降级方案：从 CDN 加载
-      if (!(window as any).JSZip) {
-        await new Promise((resolve, reject) => {
-          const script = document.createElement('script')
-          script.src = 'https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js'
-          script.onload = () => {
-            console.log('[Export ZIP] JSZip loaded from CDN')
-            resolve(true)
-          }
-          script.onerror = (err) => {
-            console.error('[Export ZIP] CDN load failed', err)
-            reject(err)
-          }
-          document.head.appendChild(script)
-        })
-      }
-      JSZip = (window as any).JSZip
-    }
-    
-    if (!JSZip) {
-      throw new Error('JSZip 加载失败')
-    }
-    
-    const zip = new JSZip()
-    console.log('[Export ZIP] Creating ZIP archive...')
-    
-    // 将所有笔记添加到 ZIP，按分类路径组织文件夹结构
-    for (let i = 0; i < notes.length; i++) {
-      const note = notes[i]
-      // 如果有分类路径，创建子文件夹
-      let filePath = note.filename
-      if (note.categoryPath) {
-        filePath = `${note.categoryPath}/${note.filename}`
-      }
-      zip.file(filePath, note.content)
-      console.log(`[Export ZIP] Added file ${i + 1}/${notes.length}:`, filePath)
-    }
-    
-    console.log('[Export ZIP] Generating ZIP blob...')
-    // 生成 ZIP 文件
-    const blob = await zip.generateAsync({ type: 'blob' })
-    console.log('[Export ZIP] ZIP blob generated, size:', blob.size, 'bytes')
-    
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `${folderName}-${notes.length}篇笔记.zip`
-    console.log('[Export ZIP] Triggering download:', a.download)
-    a.click()
-    URL.revokeObjectURL(url)
-    
-    ElMessage.success(`已导出 ZIP 压缩包：${folderName}（${notes.length} 篇笔记）`)
-    console.log('[Export ZIP] Export completed successfully')
-  } catch (error) {
-    console.error('[Export ZIP] Error:', error)
-    ElMessage.error('导出 ZIP 失败：' + (error as Error).message)
-  }
-}
-
-// 导出为文件夹（包含图片）
-async function exportAsFolder(
-  folderName: string,
-  notes: Array<{ filename: string; content: string; categoryPath?: string }>,
-  images: Array<{ filename: string; base64: string; path: string }>
-) {
-  console.log('[Export Folder] Starting folder export, notes count:', notes.length, 'images count:', images.length)
-  
-  try {
-    // 尝试从本地导入 JSZip
-    let JSZip: any
-    
-    try {
-      console.log('[Export Folder] Trying to import JSZip from local...')
-      const jszipModule = await import('jszip')
-      JSZip = jszipModule.default || jszipModule
-      console.log('[Export Folder] JSZip loaded from local')
-    } catch (importError) {
-      console.warn('[Export Folder] Local import failed, trying CDN...', importError)
-      // 降级方案：从 CDN 加载
-      if (!(window as any).JSZip) {
-        await new Promise((resolve, reject) => {
-          const script = document.createElement('script')
-          script.src = 'https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js'
-          script.onload = () => {
-            console.log('[Export Folder] JSZip loaded from CDN')
-            resolve(true)
-          }
-          script.onerror = (err) => {
-            console.error('[Export Folder] CDN load failed', err)
-            reject(err)
-          }
-          document.head.appendChild(script)
-        })
-      }
-      JSZip = (window as any).JSZip
-    }
-    
-    if (!JSZip) {
-      throw new Error('JSZip 加载失败')
-    }
-    
-    const zip = new JSZip()
-    console.log('[Export Folder] Creating ZIP archive with folder structure...')
-    
-    // 不创建根文件夹,直接将MD和图片放在ZIP根目录
-    
-    // 添加所有笔记文件，按分类路径组织
-    for (let i = 0; i < notes.length; i++) {
-      const note = notes[i]
-      let filePath = note.filename
-      if (note.categoryPath) {
-        filePath = `${note.categoryPath}/${note.filename}`
-      }
-      zip.file(filePath, note.content)
-      console.log(`[Export Folder] Added note ${i + 1}/${notes.length}:`, filePath)
-    }
-    
-    // 添加图片文件夹和图片文件(在ZIP根目录)
-    if (images.length > 0) {
-      const imagesFolder = zip.folder('images')
-      if (!imagesFolder) throw new Error('创建图片文件夹失败')
-      
-      for (let i = 0; i < images.length; i++) {
-        const image = images[i]
-        try {
-          // 将 Base64 转换为 Blob
-          const binaryString = atob(image.base64)
-          const bytes = new Uint8Array(binaryString.length)
-          for (let j = 0; j < binaryString.length; j++) {
-            bytes[j] = binaryString.charCodeAt(j)
-          }
-          const blob = new Blob([bytes])
-          
-          imagesFolder.file(image.filename, blob)
-          console.log(`[Export Folder] Added image ${i + 1}/${images.length}:`, image.filename)
-        } catch (error) {
-          console.error(`[Export Folder] Failed to add image ${image.filename}:`, error)
-        }
-      }
-    }
-    
-    console.log('[Export Folder] Generating ZIP blob...')
-    // 生成 ZIP 文件
-    const blob = await zip.generateAsync({ type: 'blob' })
-    console.log('[Export Folder] ZIP blob generated, size:', blob.size, 'bytes')
-    
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `${folderName}-${notes.length}篇笔记.zip`
-    console.log('[Export Folder] Triggering download:', a.download)
-    a.click()
-    URL.revokeObjectURL(url)
-    
-    ElMessage.success(`已导出文件夹：${folderName}（${notes.length} 篇笔记，${images.length} 张图片）`)
-    console.log('[Export Folder] Export completed successfully')
-  } catch (error) {
-    console.error('[Export Folder] Error:', error)
-    ElMessage.error('导出文件夹失败：' + (error as Error).message)
-  }
-}
-
-async function catMenuDelete() {
-  const cat = catContextMenu.value.cat
-  if (!cat) return
-  closeCatMenu()
-  try {
-    await ElMessageBox.confirm(`确定删除分类「${cat.name}」？其下的笔记将变为未分类。`, '删除分类', { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' })
-    try { await window.api.deleteCategory(cat.id) } catch { /* mock */ }
-    await categoryStore.fetchCategories()
-    if (categoryStore.selectedCategoryId === cat.id) categoryStore.selectCategory(null)
-    ElMessage.success('分类已删除')
-  } catch { /* cancel */ }
 }
 
 function handleTagContextMenu(event: MouseEvent, tag: { id: number; name: string; color: string }) {
@@ -648,6 +374,8 @@ async function onDropToCat(event: DragEvent, catId: number) {
 onMounted(async () => {
   loadArchiveYears()
   categoryStore.fetchFavorites()
+  // 加载分类树内文件数据
+  noteTreeStore.fetchTreeNotes()
   
   // 加载保存的当前查看路径
   try {
@@ -938,7 +666,7 @@ const isActive = (path: string) => route.path === path
 
       <div v-if="categoryStore.favoriteCategories.length > 0" class="sidebar-section">
         <div class="section-header">
-          <span class="section-title">⭐ 收藏的分类</span>
+          <span class="section-title"><el-icon class="section-title-icon"><StarFilled /></el-icon>收藏的分类</span>
         </div>
         <CategoryTreeItem
           v-for="fav in categoryStore.favoriteCategories"
@@ -948,7 +676,9 @@ const isActive = (path: string) => route.path === path
           :selected-category-id="categoryStore.selectedCategoryId"
           :drag-over-cat-id="dragOverCatId"
           @select-category="selectCategory"
-          @context-menu="(evt: MouseEvent, cat: Category) => handleCatContextMenu(evt, cat)"
+          @context-menu="(evt: MouseEvent, cat: Category) => catMenu.open(evt, cat)"
+          @open-note="openNoteFromTree"
+          @tree-data-changed="refreshTreeData"
           @cat-drag-start="(evt: DragEvent, cat: Category) => onCatDragStart(evt, cat)"
           @cat-drag-over="(evt: DragEvent, catId: number) => onDragOverCat(evt, catId)"
           @cat-drag-leave="onDragLeaveCat"
@@ -958,7 +688,7 @@ const isActive = (path: string) => route.path === path
 
       <div class="sidebar-section">
         <div class="section-header">
-          <span class="section-title">分类</span>
+          <span class="section-title"><el-icon class="section-title-icon"><Folder /></el-icon>分类</span>
           <el-button size="small" text :icon="'Plus'" @click="showAddCatInput = true" title="新建分类" />
         </div>
         <div v-if="showAddCatInput" class="add-cat-row">
@@ -974,21 +704,23 @@ const isActive = (path: string) => route.path === path
           :selected-category-id="categoryStore.selectedCategoryId"
           :drag-over-cat-id="dragOverCatId"
           @select-category="selectCategory"
-          @context-menu="(evt: MouseEvent, cat: Category) => handleCatContextMenu(evt, cat)"
+          @context-menu="(evt: MouseEvent, cat: Category) => catMenu.open(evt, cat)"
+          @open-note="openNoteFromTree"
+          @tree-data-changed="refreshTreeData"
           @cat-drag-start="(evt: DragEvent, cat: Category) => onCatDragStart(evt, cat)"
           @cat-drag-over="(evt: DragEvent, catId: number) => onDragOverCat(evt, catId)"
           @cat-drag-leave="onDragLeaveCat"
           @cat-drop="(evt: DragEvent, catId: number) => onDropToCat(evt, catId)"
         />
         <div class="menu-item" :class="{ active: categoryStore.selectedCategoryId === null && route.path === '/' }" @click="selectCategory(null)">
-          <el-icon><FolderAdd /></el-icon>
+          <el-icon><FolderRemove /></el-icon>
           <span>未分类</span>
         </div>
       </div>
 
       <div class="sidebar-section">
         <div class="section-header">
-          <span class="section-title">日期归档</span>
+          <span class="section-title"><el-icon class="section-title-icon"><Clock /></el-icon>日期归档</span>
         </div>
         <div v-for="year in archiveYears" :key="year">
           <div class="menu-item" @click="toggleYear(year)">
@@ -1005,7 +737,7 @@ const isActive = (path: string) => route.path === path
 
       <div class="sidebar-section">
         <div class="section-header">
-          <span class="section-title">标签</span>
+          <span class="section-title"><el-icon class="section-title-icon"><PriceTag /></el-icon>标签</span>
         </div>
         <div 
           class="menu-item tag-item" 
@@ -1029,7 +761,19 @@ const isActive = (path: string) => route.path === path
     <div class="sidebar-bottom-panel">
       <div class="panel-header" @click="showExternalFiles = !showExternalFiles">
         <el-icon><component :is="showExternalFiles ? 'ArrowDown' : 'ArrowRight'" /></el-icon>
+        <el-icon class="panel-title-icon"><Files /></el-icon>
         <span class="panel-title">外部文件 ({{ externalFiles.length }})</span>
+        <el-button class="ai-entry-btn" :class="{ active: route.path === '/ai-assistant' }" size="small" text title="AI 助手" @click.stop="goAiAssistant">
+          <svg class="robot-icon" viewBox="0 0 24 24" width="16" height="16" fill="none"
+            stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="4" y="8" width="16" height="11" rx="3" />
+            <circle cx="9" cy="13" r="1.3" fill="currentColor" stroke="none" />
+            <circle cx="15" cy="13" r="1.3" fill="currentColor" stroke="none" />
+            <path d="M12 8V5" />
+            <circle cx="12" cy="3.6" r="1.4" />
+            <path d="M1.8 12.5v3M22.2 12.5v3" />
+          </svg>
+        </el-button>
         <div v-if="showExternalFiles" class="header-actions" @click.stop>
           <el-button size="small" text @click="openExternalFolder" title="打开文件夹">
             <el-icon><FolderOpened /></el-icon>
@@ -1038,7 +782,7 @@ const isActive = (path: string) => route.path === path
             <el-icon><FolderAdd /></el-icon>
           </el-button>
           <el-button size="small" text @click="newExternalFile" title="新建文件">
-            <el-icon><Document /></el-icon>
+            <el-icon><DocumentAdd /></el-icon>
           </el-button>
           <template v-if="fileTree.length > 0">
             <el-button size="small" text @click="expandAllDirs" title="全部展开">
@@ -1068,26 +812,10 @@ const isActive = (path: string) => route.path === path
         </el-scrollbar>
     </div>
 
-    <Teleport to="body">
-      <div v-if="catContextMenu.visible" class="context-menu-overlay" :style="{ left: catContextMenu.x + 'px', top: catContextMenu.y + 'px' }" @click.stop>
-        <div class="context-menu-item" @click="catMenuNewSub">
-          <el-icon><FolderAdd /></el-icon> 新建子文件夹
-        </div>
-        <div class="context-menu-item" @click="catMenuRename">
-          <el-icon><Edit /></el-icon> 重命名
-        </div>
-        <div class="context-menu-item" @click="catMenuToggleFavorite">
-          <el-icon><Star /></el-icon> {{ catContextMenu.cat?.is_favorite ? '取消收藏' : '收藏文件夹' }}
-        </div>
-        <div class="context-menu-item" @click="catMenuExport">
-          <el-icon><Download /></el-icon> 导出
-        </div>
-        <div class="context-menu-divider"></div>
-        <div class="context-menu-item danger" @click="catMenuDelete">
-          <el-icon><Delete /></el-icon> 删除
-        </div>
-      </div>
+    <!-- 分类右键菜单（与中间列表子文件夹共用） -->
+    <CategoryContextMenu :ctx="catMenu" />
 
+    <Teleport to="body">
       <div v-if="tagContextMenu.visible" class="context-menu-overlay" :style="{ left: tagContextMenu.x + 'px', top: tagContextMenu.y + 'px' }" @click.stop>
         <div class="context-menu-item" @click="tagMenuRename">
           <el-icon><Edit /></el-icon> 重命名
@@ -1239,7 +967,13 @@ const isActive = (path: string) => route.path === path
 .menu-item[draggable="true"] { cursor: grab; }
 .menu-item[draggable="true"]:active { cursor: grabbing; }
 .section-header { display: flex; align-items: center; justify-content: space-between; padding: 16px 12px 8px; }
-.section-title { font-size: 11px; font-weight: 600; text-transform: uppercase; color: var(--text-tertiary); letter-spacing: 0.5px; }
+.section-title { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; text-transform: uppercase; color: var(--text-tertiary); letter-spacing: 0.5px; }
+.section-title-icon { font-size: 13px; }
+.panel-title-icon { font-size: 13px; flex-shrink: 0; }
+/* AI 助手入口按钮 */
+.ai-entry-btn { padding: 4px !important; flex-shrink: 0; color: var(--text-secondary); }
+.ai-entry-btn .robot-icon { display: block; }
+.ai-entry-btn:hover, .ai-entry-btn.active { color: var(--accent-color); }
 .sidebar-section { padding: 0 4px; }
 .add-cat-row { display: flex; gap: 4px; padding: 4px 12px 8px; align-items: center; }
 

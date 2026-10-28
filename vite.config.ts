@@ -8,8 +8,12 @@ import { resolve } from 'path'
 export default defineConfig({
   plugins: [
     vue(),
-    AutoImport({ resolvers: [ElementPlusResolver()] }),
-    Components({ resolvers: [ElementPlusResolver()] })
+    // importStyle: false —— main.ts 已全量引入 element-plus/dist/index.css，
+    // 关闭 resolver 的按需样式注入。否则开发期每访问一个用到新组件的页面，
+    // Vite 都要重新预构建一批 element-plus/es/components/*/style/css 并强制整页重载，
+    // 会冲掉正在进行中的路由跳转（表现为“点击图标没反应”）。
+    AutoImport({ resolvers: [ElementPlusResolver({ importStyle: false })] }),
+    Components({ resolvers: [ElementPlusResolver({ importStyle: false })] })
   ],
   resolve: {
     alias: {

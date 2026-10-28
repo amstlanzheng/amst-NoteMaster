@@ -714,6 +714,7 @@ function copyDbPath() {
       <template #header><span>外观</span></template>
       <div class="setting-row"><span>深色模式</span><el-switch v-model="uiStore.isDarkMode" @change="uiStore.toggleDarkMode" /></div>
       <div class="setting-row"><span>显示文件夹内文件数量</span><el-switch v-model="uiStore.showFolderCount" /></div>
+      <div class="setting-row"><span>分类中显示文件</span><el-switch v-model="uiStore.showFilesInCategory" /></div>
     </el-card>
 
     <el-card class="setting-card">

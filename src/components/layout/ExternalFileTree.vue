@@ -253,6 +253,63 @@ async function deleteFile() {
   } catch { /* cancel */ }
 }
 
+// 重命名（文件或文件夹）
+async function renameNode() {
+  closeContextMenu()
+  if (!selectedNode.value) return
+  const oldPath = selectedNode.value.path
+  const oldName = oldPath.split(/[\\/]/).pop() || ''
+  try {
+    const { value } = await ElMessageBox.prompt('新名称', '重命名', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      inputValue: oldName,
+      inputPattern: /^[^\\/:*?"<>|]+$/,
+      inputErrorMessage: '名称不能包含特殊字符'
+    })
+    const name = value?.trim()
+    if (!name || name === oldName) return
+    const parent = getParentPath()
+    if (!parent) {
+      ElMessage.error('无法确定所在目录')
+      return
+    }
+    const newPath = parent + '/' + name
+    await window.api.renameExternalPath(oldPath, newPath)
+    // 若被重命名的是已展开的文件夹，同步更新展开状态
+    if (selectedNode.value.type === 'dir' && expandedDirs.value.has(oldPath)) {
+      expandedDirs.value.delete(oldPath)
+      expandedDirs.value.add(newPath)
+      saveExpandedDirs()
+    }
+    ElMessage.success('重命名成功')
+    emit('refresh')
+  } catch (e: any) {
+    if (e !== 'cancel' && e !== 'close') ElMessage.error('重命名失败: ' + (e?.message || e))
+  }
+}
+
+// 移动到指定目录
+async function moveNode() {
+  closeContextMenu()
+  if (!selectedNode.value) return
+  const src = selectedNode.value.path
+  try {
+    const { value } = await ElMessageBox.prompt('目标文件夹的绝对路径', '移动到', {
+      confirmButtonText: '移动',
+      cancelButtonText: '取消',
+      inputValue: getParentPath() || ''
+    })
+    const dest = value?.trim()
+    if (!dest) return
+    await window.api.moveExternalPath(src, dest)
+    ElMessage.success('移动成功')
+    emit('refresh')
+  } catch (e: any) {
+    if (e !== 'cancel' && e !== 'close') ElMessage.error('移动失败: ' + (e?.message || e))
+  }
+}
+
 // 格式化文件大小
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return bytes + ' B'
@@ -344,7 +401,7 @@ defineExpose({
             @click.stop="emit('open', node.files![0].path)"
             title="用系统程序打开"
           >
-            <el-icon><FolderOpened /></el-icon>
+            <el-icon><TopRight /></el-icon>
           </el-button>
         </div>
       </template>
@@ -362,7 +419,10 @@ defineExpose({
               <ArrowDown v-if="expandedDirs.has(node.path)" />
               <ArrowRight v-else />
             </el-icon>
-            <el-icon class="folder-icon"><FolderOpened /></el-icon>
+            <el-icon class="folder-icon">
+              <FolderOpened v-if="expandedDirs.has(node.path)" />
+              <Folder v-else />
+            </el-icon>
             <span class="dir-name" :title="node.name">{{ node.name }}</span>
             <el-tag v-if="node.files && node.files.length > 0" size="small" round>{{ node.files.length }}</el-tag>
           </div>
@@ -410,7 +470,7 @@ defineExpose({
                   @click.stop="emit('open', file.path)"
                   title="用系统程序打开"
                 >
-                  <el-icon><FolderOpened /></el-icon>
+                  <el-icon><TopRight /></el-icon>
                 </el-button>
               </div>
             </div>
@@ -427,7 +487,14 @@ defineExpose({
             <el-icon><FolderAdd /></el-icon> 在此文件夹内新建文件夹
           </div>
           <div class="ext-context-menu-item" @click="createNewFile(true)">
-            <el-icon><Document /></el-icon> 在此文件夹内新建文件
+            <el-icon><DocumentAdd /></el-icon> 在此文件夹内新建文件
+          </div>
+          <div class="ext-context-menu-divider"></div>
+          <div class="ext-context-menu-item" @click="renameNode">
+            <el-icon><Edit /></el-icon> 重命名
+          </div>
+          <div class="ext-context-menu-item" @click="moveNode">
+            <el-icon><Position /></el-icon> 移动到
           </div>
           <div class="ext-context-menu-divider"></div>
           <div class="ext-context-menu-item danger" @click="deleteDir">
@@ -439,7 +506,14 @@ defineExpose({
             <el-icon><FolderAdd /></el-icon> 同级新建文件夹
           </div>
           <div class="ext-context-menu-item" @click="createNewFile(false)">
-            <el-icon><Document /></el-icon> 同级新建文件
+            <el-icon><DocumentAdd /></el-icon> 同级新建文件
+          </div>
+          <div class="ext-context-menu-divider"></div>
+          <div class="ext-context-menu-item" @click="renameNode">
+            <el-icon><Edit /></el-icon> 重命名
+          </div>
+          <div class="ext-context-menu-item" @click="moveNode">
+            <el-icon><Position /></el-icon> 移动到
           </div>
           <div class="ext-context-menu-divider"></div>
           <div class="ext-context-menu-item danger" @click="deleteFile">

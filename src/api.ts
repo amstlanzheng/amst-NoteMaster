@@ -178,6 +178,26 @@ async function getNote(id: number): Promise<Note | null> {
   }
 }
 
+/**
+ * 获取全部未删除笔记的轻量字段（不含正文 content），
+ * 用于左侧分类树内的文件展示，避免拉取大字段与 N+1 查询。
+ */
+async function getNoteTreeLite(): Promise<Note[]> {
+  const rows = await getAll<any>(
+    `SELECT id, title, content_type, category_id, is_favorite, is_pinned, is_deleted,
+            sort_weight, created_at, updated_at
+     FROM notes
+     WHERE is_deleted = 0
+     ORDER BY is_pinned DESC, sort_weight ASC, updated_at DESC`
+  )
+  return rows.map((note) => ({
+    ...note,
+    is_favorite: !!note.is_favorite,
+    is_pinned: !!note.is_pinned,
+    is_deleted: !!note.is_deleted
+  }))
+}
+
 async function createNote(data: Partial<Note>): Promise<number> {
   const result = await run(
     'INSERT INTO notes (title, content, content_type, category_id) VALUES (?, ?, ?, ?)',
@@ -828,6 +848,84 @@ async function deleteExternalFile(filePath: string): Promise<void> {
   return invoke('delete_external_file', { filePath })
 }
 
+/** 将文本内容写入外部文件（UTF-8） */
+async function saveExternalText(filePath: string, content: string): Promise<void> {
+  return invoke('save_external_text', { filePath, content })
+}
+
+/** 读取外部文本文件内容，返回 { content?, error? } */
+async function readTextFile(filePath: string): Promise<{ content?: string; error?: string }> {
+  return invoke('read_text_file', { filePath })
+}
+
+/** 重命名外部文件或目录（同目录内改名） */
+async function renameExternalPath(oldPath: string, newPath: string): Promise<void> {
+  return invoke('rename_external_path', { oldPath, newPath })
+}
+
+/** 移动外部文件或目录到目标目录，返回新路径 */
+async function moveExternalPath(sourcePath: string, destDir: string): Promise<string> {
+  return invoke('move_external_path', { sourcePath, destDir })
+}
+
+// ============================================================
+// AI 助手（Rust 端转发，OpenAI 兼容接口）
+// ============================================================
+
+/** 聊天消息 */
+export interface AiChatMessage {
+  role: 'system' | 'user' | 'assistant'
+  content: string
+}
+
+/** 聊天请求参数 */
+export interface AiChatRequest {
+  requestId: string
+  baseUrl: string
+  apiKey: string
+  model: string
+  messages: AiChatMessage[]
+  temperature?: number
+  stream?: boolean
+}
+
+/** 流式事件负载 */
+export interface AiStreamPayload {
+  requestId: string
+  delta: string
+}
+export interface AiErrorPayload {
+  requestId: string
+  message: string
+}
+
+/** 通用 AI 事件监听 */
+function listenAiEvent<T>(event: string, cb: (payload: T) => void): () => void {
+  let unlisten: UnlistenFn | null = null
+  listen<T>(event, (e) => cb(e.payload)).then(fn => { unlisten = fn })
+  return () => { unlisten?.() }
+}
+
+/** 发起流式聊天请求（结果通过下方事件回调返回） */
+async function aiChatStream(request: AiChatRequest): Promise<void> {
+  return invoke('ai_chat_stream', { request })
+}
+
+/** 取消进行中的流式请求 */
+async function aiAbortStream(requestId: string): Promise<void> {
+  return invoke('ai_abort_stream', { requestId })
+}
+
+/** 测试模型连通性（返回原始响应文本，失败抛错） */
+async function aiTestConnection(baseUrl: string, apiKey: string, model: string): Promise<string> {
+  return invoke('ai_test_connection', { baseUrl, apiKey, model })
+}
+
+const onAiChunk = (cb: (p: AiStreamPayload) => void) => listenAiEvent<AiStreamPayload>('ai-chunk', cb)
+const onAiReasoning = (cb: (p: AiStreamPayload) => void) => listenAiEvent<AiStreamPayload>('ai-reasoning', cb)
+const onAiDone = (cb: (p: { requestId: string }) => void) => listenAiEvent<{ requestId: string }>('ai-done', cb)
+const onAiError = (cb: (p: AiErrorPayload) => void) => listenAiEvent<AiErrorPayload>('ai-error', cb)
+
 // ============================================================
 // 同步（SFTP）— 暂未实现，返回提示
 // ============================================================
@@ -975,7 +1073,7 @@ async function initDb() {
 
 const api = {
   // 笔记
-  getNotes, getNote, createNote, updateNote, deleteNote, batchDeleteNotes, duplicateNote,
+  getNotes, getNote, getNoteTreeLite, createNote, updateNote, deleteNote, batchDeleteNotes, duplicateNote,
   renameNote, updateNoteWeight, exportNoteMd, exportNoteHtml,
   // 分类
   getCategories, createCategory, updateCategory, deleteCategory, createSubCategory,
@@ -1001,6 +1099,10 @@ const api = {
   importFile, importFolder, resolveFileConflict, setCurrentViewingPath, getCurrentViewingPath,
   scanExternalDirs, openExternalFile, saveExternalFile, createExternalDir,
   createExternalFile, deleteExternalDir, deleteExternalFile,
+  saveExternalText, readTextFile, renameExternalPath, moveExternalPath,
+  // AI 助手
+  aiChatStream, aiAbortStream, aiTestConnection,
+  onAiChunk, onAiReasoning, onAiDone, onAiError,
   // 同步
   testSyncConnection, uploadToCloud, downloadFromCloud,
   // MinIO

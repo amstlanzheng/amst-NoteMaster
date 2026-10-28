@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "默认权限：允许核心 API + SQL 全部权限 + 对话框 + 文件系统",
+  "description": "默认权限：允许核心 API + SQL 全部权限 + 对话框 + 进程",
   "windows": ["main"],
   "permissions": [
     "core:default",
@@ -11,8 +11,6 @@
     "sql:allow-select",
     "sql:allow-close",
     "dialog:default",
-    "fs:default",
-    "shell:allow-open",
     "process:default"
   ]
 }

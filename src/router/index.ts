@@ -17,6 +17,7 @@ const router = createRouter({
     { path: '/stats', name: 'stats', component: () => import('../views/StatsView.vue') },
     { path: '/files', name: 'files', component: () => import('../views/FileSpaceView.vue') },
     { path: '/external-preview', name: 'external-preview', component: () => import('../views/ExternalFilePreview.vue') },
+    { path: '/ai-assistant', name: 'ai-assistant', component: () => import('../views/AiAssistantView.vue') },
     { path: '/settings', name: 'settings', component: () => import('../views/SettingsView.vue') }
   ]
 })

@@ -2,10 +2,12 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useNoteStore } from '../stores/note'
+import { useCategoryStore } from '../stores/category'
 import { formatRelative, stripMarkdown, truncate } from '../utils/format'
 import type { Note } from '@shared/types'
 
 const noteStore = useNoteStore()
+const categoryStore = useCategoryStore()
 const router = useRouter()
 const favNotes = ref<Note[]>([])
 
@@ -13,9 +15,16 @@ async function loadFavorites() {
   favNotes.value = await window.api.getNotes({ is_favorite: true })
 }
 
+// 点击收藏笔记：跳转打开，同时让中间文件栏定位到该笔记所属分类目录
 async function selectNote(note: Note) {
-  noteStore.currentNote = note
-  noteStore.clearFilters()
+  const catId = note.category_id ?? null
+  // 中间列表切换到对应分类
+  categoryStore.selectCategory(catId)
+  noteStore.currentNote = null
+  noteStore.filters = { category_id: catId }
+  await noteStore.fetchNotes()
+  // 加载完整笔记内容并在编辑器打开
+  await noteStore.fetchNote(note.id)
   await router.push('/')
 }
 

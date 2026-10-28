@@ -459,6 +459,47 @@ pub fn delete_external_file(file_path: String) -> Result<(), String> {
     fs::remove_file(&file_path).map_err(|e| e.to_string())
 }
 
+/// 将文本内容写入外部文件（UTF-8）
+#[tauri::command]
+pub fn save_external_text(file_path: String, content: String) -> Result<(), String> {
+    fs::write(&file_path, content).map_err(|e| e.to_string())
+}
+
+/// 重命名外部文件或目录（同目录内改名）
+#[tauri::command]
+pub fn rename_external_path(old_path: String, new_path: String) -> Result<(), String> {
+    let src = std::path::Path::new(&old_path);
+    if !src.exists() {
+        return Err("源路径不存在".to_string());
+    }
+    if std::path::Path::new(&new_path).exists() {
+        return Err("目标名称已存在".to_string());
+    }
+    fs::rename(src, &new_path).map_err(|e| e.to_string())
+}
+
+/// 移动外部文件或目录到目标目录，返回移动后的新路径
+#[tauri::command]
+pub fn move_external_path(source_path: String, dest_dir: String) -> Result<String, String> {
+    let src = std::path::Path::new(&source_path);
+    if !src.exists() {
+        return Err("源路径不存在".to_string());
+    }
+    let dest_root = std::path::Path::new(&dest_dir);
+    if !dest_root.is_dir() {
+        return Err("目标目录不存在".to_string());
+    }
+    let name = src
+        .file_name()
+        .ok_or_else(|| "无法获取文件名".to_string())?;
+    let dest = dest_root.join(name);
+    if dest.exists() {
+        return Err("目标目录已存在同名项".to_string());
+    }
+    fs::rename(src, &dest).map_err(|e| e.to_string())?;
+    Ok(dest.to_string_lossy().to_string())
+}
+
 // ============================================================
 // 导入
 // ============================================================

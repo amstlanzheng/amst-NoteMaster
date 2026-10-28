@@ -9,3 +9,6 @@ Thumbs.db
 _migrate/
 auto-imports.d.ts
 components.d.ts
+.env
+.env.*
+*.local

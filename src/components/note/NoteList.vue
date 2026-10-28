@@ -6,6 +6,10 @@ import { useCategoryStore } from '../../stores/category'
 import { useTagStore } from '../../stores/tag'
 import { useUiStore } from '../../stores/ui'
 import { formatRelative, stripMarkdown, truncate } from '../../utils/format'
+import { useNoteContextMenu } from '../../composables/useNoteContextMenu'
+import { useCategoryContextMenu } from '../../composables/useCategoryContextMenu'
+import NoteContextMenu from '../common/NoteContextMenu.vue'
+import CategoryContextMenu from '../common/CategoryContextMenu.vue'
 import type { Note, Category } from '@shared/types'
 
 const noteStore = useNoteStore()
@@ -13,7 +17,11 @@ const categoryStore = useCategoryStore()
 const tagStore = useTagStore()
 const uiStore = useUiStore()
 
-const noteContextMenu = ref({ visible: false, x: 0, y: 0, note: null as Note | null })
+// 笔记右键菜单（与左侧分类树内文件共用）
+const noteMenu = useNoteContextMenu()
+// 子文件夹右键菜单（与左侧分类树共用）
+const catMenu = useCategoryContextMenu()
+
 const batchMode = ref(false)
 const selectedIds = ref<Set<number>>(new Set())
 const batchDeleting = ref(false)
@@ -185,172 +193,6 @@ function getPreview(note: Note): string {
   return truncate(stripMarkdown(note.content || ''), 100) || '空笔记'
 }
 
-function handleNoteContextMenu(event: MouseEvent, note: Note) {
-  event.preventDefault()
-  event.stopPropagation()
-  noteContextMenu.value = { visible: true, x: event.clientX, y: event.clientY, note }
-  setTimeout(() => { document.addEventListener('click', closeNoteMenu, { once: true }) }, 0)
-}
-
-function closeNoteMenu() {
-  noteContextMenu.value.visible = false
-}
-
-async function menuRename() {
-  const note = noteContextMenu.value.note
-  if (!note) return
-  closeNoteMenu()
-  try {
-    const { value } = await ElMessageBox.prompt('新的笔记名称', '重命名', {
-      confirmButtonText: '确定', cancelButtonText: '取消', inputValue: note.title
-    })
-    if (value?.trim()) {
-      try { await window.api.renameNote(note.id, value.trim()) } catch { /* mock */ }
-      await noteStore.fetchNotes()
-      if (noteStore.currentNote?.id === note.id) noteStore.currentNote.title = value.trim()
-      ElMessage.success('已重命名')
-    }
-  } catch { /* cancel */ }
-}
-
-async function menuExportMd() {
-  const note = noteContextMenu.value.note
-  if (!note) return
-  closeNoteMenu()
-  try {
-    const result = await window.api.exportNoteMd(note.id)
-    if (result) {
-      // 如果有图片，导出为 ZIP
-      if (result.images && result.images.length > 0) {
-        await exportSingleNoteAsZip(result.title, result.content, result.images)
-      } else {
-        // 没有图片，直接下载 MD 文件
-        downloadText(result.content, `${result.title}.md`, 'text/markdown')
-      }
-    }
-  } catch {
-    downloadText(`---\ntitle: "${note.title}"\ndate: ${note.updated_at}\n---\n\n${note.content}`, `${note.title}.md`, 'text/markdown')
-  }
-  ElMessage.success('Markdown 已导出')
-}
-
-async function exportSingleNoteAsZip(title: string, content: string, images: Array<{ filename: string; base64: string }>) {
-  try {
-    let JSZip: any
-    
-    try {
-      const jszipModule = await import('jszip')
-      JSZip = jszipModule.default || jszipModule
-    } catch {
-      if (!(window as any).JSZip) {
-        await new Promise((resolve, reject) => {
-          const script = document.createElement('script')
-          script.src = 'https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js'
-          script.onload = () => resolve(true)
-          script.onerror = reject
-          document.head.appendChild(script)
-        })
-      }
-      JSZip = (window as any).JSZip
-    }
-    
-    if (!JSZip) throw new Error('JSZip 加载失败')
-    
-    const zip = new JSZip()
-    // 不创建根文件夹,直接将MD和图片放在ZIP根目录
-    
-    // 添加 Markdown 文件到根目录
-    zip.file(`${title}.md`, content)
-    
-    // 添加图片文件夹和图片到根目录
-    if (images.length > 0) {
-      const imagesFolder = zip.folder('images')
-      if (!imagesFolder) throw new Error('创建图片文件夹失败')
-      
-      for (const image of images) {
-        const binaryString = atob(image.base64)
-        const bytes = new Uint8Array(binaryString.length)
-        for (let j = 0; j < binaryString.length; j++) {
-          bytes[j] = binaryString.charCodeAt(j)
-        }
-        imagesFolder.file(image.filename, bytes)
-      }
-    }
-    
-    const blob = await zip.generateAsync({ type: 'blob' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `${title}.zip`
-    a.click()
-    URL.revokeObjectURL(url)
-  } catch (error) {
-    console.error('Export as ZIP failed:', error)
-    ElMessage.error('导出 ZIP 失败')
-  }
-}
-
-async function menuExportHtml() {
-  const note = noteContextMenu.value.note
-  if (!note) return
-  closeNoteMenu()
-  try {
-    const result = await window.api.exportNoteHtml(note.id)
-    if (result) {
-      // 如果有图片，导出为 ZIP
-      if (result.images && result.images.length > 0) {
-        await exportSingleNoteAsZip(result.title, result.content, result.images)
-      } else {
-        // 没有图片，直接下载 HTML 文件
-        downloadText(result.content, `${result.title}.html`, 'text/html')
-      }
-    }
-  } catch {
-    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${note.title}</title><style>body{max-width:800px;margin:0 auto;padding:40px 20px;font-family:sans-serif;font-size:16px;line-height:1.8}</style></head><body><pre>${note.content}</pre></body></html>`
-    downloadText(html, `${note.title}.html`, 'text/html')
-  }
-  ElMessage.success('HTML 已导出')
-}
-
-async function menuDelete() {
-  const note = noteContextMenu.value.note
-  if (!note) return
-  closeNoteMenu()
-  try {
-    await ElMessageBox.confirm(`确定删除「${note.title}」？将移入回收站。`, '删除笔记', { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' })
-    await noteStore.deleteNote(note.id)
-    ElMessage.success('已移入回收站')
-  } catch { /* cancel */ }
-}
-
-async function menuSetWeight() {
-  const note = noteContextMenu.value.note
-  if (!note) return
-  closeNoteMenu()
-  try {
-    const { value } = await ElMessageBox.prompt('权重数字越小排序越靠前（置顶笔记优先）', '设置权重', {
-      confirmButtonText: '确定',
-      cancelButtonText: '取消',
-      inputValue: String(note.sort_weight ?? 999),
-      inputPattern: /^-?\d+$/,
-      inputErrorMessage: '请输入整数'
-    })
-    const weight = parseInt(value, 10)
-    await window.api.updateNoteWeight(note.id, weight)
-    note.sort_weight = weight
-    noteStore.fetchNotes()
-    ElMessage.success('权重已更新')
-  } catch { /* cancel */ }
-}
-
-function downloadText(content: string, filename: string, mime: string) {
-  const blob = new Blob([content], { type: mime })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url; a.download = filename; a.click()
-  URL.revokeObjectURL(url)
-}
-
 function onDragStart(event: DragEvent, note: Note) {
   event.dataTransfer!.setData('text/note-id', String(note.id))
   event.dataTransfer!.effectAllowed = 'move'
@@ -478,7 +320,7 @@ async function goBackToPrevNote() {
       <div class="toolbar-actions">
         <el-dropdown v-if="!batchMode" trigger="click" @command="handleSortChange">
           <el-button size="small" text title="排序方式" class="toolbar-btn">
-            <el-icon><Top /></el-icon>
+            <el-icon><Sort /></el-icon>
           </el-button>
           <template #dropdown>
             <el-dropdown-menu>
@@ -494,7 +336,7 @@ async function goBackToPrevNote() {
           <el-icon><component :is="uiStore.noteViewMode === 'summary' ? 'List' : 'Grid'" /></el-icon>
         </el-button>
         <el-button v-if="!batchMode" size="small" text title="批量操作" @click="toggleBatchMode" class="toolbar-btn">
-          <el-icon><Document /></el-icon>
+          <el-icon><Operation /></el-icon>
         </el-button>
       </div>
     </div>
@@ -513,6 +355,7 @@ async function goBackToPrevNote() {
             :key="cat.id"
             class="sub-folder-card"
             @click="enterSubCategory(cat.id)"
+            @contextmenu="catMenu.open($event, cat)"
           >
             <el-icon class="folder-icon"><Folder /></el-icon>
             <span class="folder-name">{{ cat.name }}</span>
@@ -539,7 +382,7 @@ async function goBackToPrevNote() {
           :class="{ active: noteStore.currentNote?.id === note.id, pinned: note.is_pinned, 'list-mode': uiStore.noteViewMode === 'list' }"
           :draggable="!batchMode"
           @click="batchMode ? toggleSelect(note, $event) : selectNote(note)"
-          @contextmenu="batchMode ? null : handleNoteContextMenu($event, note)"
+          @contextmenu="batchMode ? null : noteMenu.open($event, note)"
           @dragstart="batchMode ? null : onDragStart($event, note)">
           <el-checkbox v-if="batchMode" :model-value="selectedIds.has(note.id)" class="batch-check" @change="toggleSelect(note, $event)" />
           <div class="card-icon">
@@ -576,27 +419,9 @@ async function goBackToPrevNote() {
       </template>
     </el-scrollbar>
 
-    <Teleport to="body">
-      <div v-if="noteContextMenu.visible" class="context-menu-overlay" :style="{ left: noteContextMenu.x + 'px', top: noteContextMenu.y + 'px' }" @click.stop>
-        <div class="context-menu-item" @click="menuRename">
-          <el-icon><Edit /></el-icon> 重命名
-        </div>
-        <div class="context-menu-item" @click="menuExportMd">
-          <el-icon><Download /></el-icon> 导出 Markdown
-        </div>
-        <div class="context-menu-item" @click="menuExportHtml">
-          <el-icon><Download /></el-icon> 导出 HTML
-        </div>
-        <div class="context-menu-divider"></div>
-        <div class="context-menu-item" @click="menuSetWeight">
-          <el-icon><Top /></el-icon> 设置权重
-        </div>
-        <div class="context-menu-divider"></div>
-        <div class="context-menu-item danger" @click="menuDelete">
-          <el-icon><Delete /></el-icon> 删除
-        </div>
-      </div>
-    </Teleport>
+    <!-- 笔记 / 子文件夹 右键菜单（与左侧分类树共用） -->
+    <NoteContextMenu :ctx="noteMenu" />
+    <CategoryContextMenu :ctx="catMenu" />
 
     <!-- 批量删除进度遮罩 -->
     <div v-if="batchDeleting" class="batch-delete-overlay">

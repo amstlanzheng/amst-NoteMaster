@@ -1,15 +1,17 @@
 <script setup lang="ts">
 import { ref, watch, computed, nextTick, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Picture, Delete, Close, View } from '@element-plus/icons-vue'
+import { Picture, Delete, Close, View, Aim } from '@element-plus/icons-vue'
 import { useRouter } from 'vue-router'
 import { useNoteStore } from '../../stores/note'
 import { useTagStore } from '../../stores/tag'
+import { useUiStore } from '../../stores/ui'
 import { renderMarkdown } from '../../utils/markdown'
 import type { Tag } from '@shared/types'
 
 const noteStore = useNoteStore()
 const tagStore = useTagStore()
+const uiStore = useUiStore()
 const router = useRouter()
 
 const editTitle = ref('')
@@ -470,6 +472,12 @@ function showImageDetail(img: Base64Image) {
   })
 }
 
+// 定位当前文件：让左侧分类树与中间笔记列表滚动到该笔记所在位置
+function handleLocate() {
+  if (!noteStore.currentNote) return
+  uiStore.locateNote(noteStore.currentNote.id)
+}
+
 // 迅速滚动到顶部
 function scrollToTop() {
   if (editPaneRef.value) {
@@ -553,6 +561,9 @@ function removeImage(img: Base64Image) {
         >
           <el-icon><Picture /></el-icon>
           图片 {{ base64Images.length > 0 ? `(${base64Images.length})` : '' }}
+        </el-button>
+        <el-button size="small" @click="handleLocate" title="定位当前文件">
+          <el-icon><Aim /></el-icon>
         </el-button>
         <el-button size="small" @click="scrollToTop" title="回到顶部">
           <el-icon><CaretTop /></el-icon>

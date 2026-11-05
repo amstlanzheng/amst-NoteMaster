@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getCurrentWindow } from '@tauri-apps/api/window'
@@ -119,6 +119,30 @@ async function refreshTreeData() {
     noteTreeStore.fetchTreeNotes(true)
   ])
 }
+
+// 定位当前文件：滚动到分类树中的目标文件行并短暂高亮
+function scrollToTreeNote(noteId: number, attempt = 0) {
+  const el = document.querySelector(`.file-row[data-note-id="${noteId}"]`) as HTMLElement | null
+  if (!el) {
+    // 目标分类可能刚被展开，等子树渲染完成后再试
+    if (attempt < 20) {
+      setTimeout(() => scrollToTreeNote(noteId, attempt + 1), 30)
+    }
+    return
+  }
+  el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  el.classList.add('locate-flash')
+  setTimeout(() => el.classList.remove('locate-flash'), 1400)
+}
+
+watch(
+  () => uiStore.locateSignal,
+  () => {
+    const noteId = uiStore.locateNoteId
+    if (noteId == null) return
+    scrollToTreeNote(noteId)
+  }
+)
 
 function selectTag(tagId: number) {
   // 如果当前已经选中的是这个标签，则取消选中
@@ -422,7 +446,11 @@ onMounted(async () => {
           console.error('导入文件失败:', filePath, e)
         }
       }
-      noteStore.fetchNotes()
+      await Promise.all([
+        noteStore.fetchNotes(),
+        noteTreeStore.fetchTreeNotes(true),
+        categoryStore.fetchCategories()
+      ])
       ElMessage.success(`已导入 ${result.filePaths.length} 个文件`)
     }
   })
@@ -471,8 +499,11 @@ onMounted(async () => {
           failed++
         }
       }
-      noteStore.fetchNotes()
-      categoryStore.fetchCategories()
+      await Promise.all([
+        noteStore.fetchNotes(),
+        noteTreeStore.fetchTreeNotes(true),
+        categoryStore.fetchCategories()
+      ])
       if (failed === 0) {
         ElMessage.success(`已导入 ${imported} 个文件`)
       } else {

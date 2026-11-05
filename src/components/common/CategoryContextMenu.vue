@@ -15,6 +15,9 @@ const props = defineProps<{ ctx: CategoryContextMenuCtx }>()
       <div class="context-menu-item" @click="props.ctx.newSub">
         <el-icon><FolderAdd /></el-icon> 新建子文件夹
       </div>
+      <div class="context-menu-item" @click="props.ctx.newNote">
+        <el-icon><DocumentAdd /></el-icon> 新建文件
+      </div>
       <div class="context-menu-item" @click="props.ctx.rename">
         <el-icon><Edit /></el-icon> 重命名
       </div>

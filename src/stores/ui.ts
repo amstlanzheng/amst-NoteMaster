@@ -16,6 +16,17 @@ export const useUiStore = defineStore('ui', () => {
   const noteSortOrder = ref<SortOrder>('desc')
   const noteViewMode = ref<NoteViewMode>('summary')
 
+  // 定位当前文件：locateNoteId 为目标笔记，locateSignal 每次触发自增，
+  // 侧边栏分类树与中间笔记列表监听该信号各自滚动到目标位置
+  const locateNoteId = ref<number | null>(null)
+  const locateSignal = ref(0)
+
+  function locateNote(id: number | null) {
+    if (id == null) return
+    locateNoteId.value = id
+    locateSignal.value++
+  }
+
   // 从 localStorage 加载设置
   function loadSettings() {
     try {
@@ -60,6 +71,7 @@ export const useUiStore = defineStore('ui', () => {
   return {
     sidebarWidth, listWidth, isDarkMode, searchDialogVisible, showFolderCount, showFilesInCategory,
     noteSortBy, noteSortOrder, noteViewMode,
+    locateNoteId, locateSignal, locateNote,
     toggleDarkMode, openSearchDialog, closeSearchDialog, loadSettings
   }
 })

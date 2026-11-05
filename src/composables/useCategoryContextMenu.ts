@@ -1,4 +1,5 @@
 import { reactive } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { Category } from '@shared/types'
 import { useCategoryStore } from '../stores/category'
@@ -14,9 +15,10 @@ interface CatMenuState {
 /**
  * 分类（文件夹）右键菜单：左侧分类树与中间列表的子文件夹卡片共用，
  * 保证两处菜单项与行为完全一致。
- * 菜单项：新建子文件夹 / 重命名 / 收藏 / 导出 / 删除
+ * 菜单项：新建子文件夹 / 新建文件 / 重命名 / 收藏 / 导出 / 删除
  */
 export function useCategoryContextMenu() {
+  const router = useRouter()
   const categoryStore = useCategoryStore()
   const noteStore = useNoteStore()
 
@@ -53,6 +55,26 @@ export function useCategoryContextMenu() {
       }
     } catch {
       /* cancel */
+    }
+  }
+
+  /** 在目标文件夹下新建一篇笔记（文件） */
+  async function newNote() {
+    const cat = menu.cat
+    if (!cat) return
+    close()
+    try {
+      categoryStore.selectCategory(cat.id)
+      noteStore.setFilters({ category_id: cat.id })
+      const id = await noteStore.createNote({
+        title: '新笔记',
+        content: '',
+        category_id: cat.id
+      })
+      await noteStore.fetchNote(id)
+      router.push('/')
+    } catch (e: any) {
+      ElMessage.error('新建文件失败：' + (e?.message || '未知错误'))
     }
   }
 
@@ -220,6 +242,7 @@ export function useCategoryContextMenu() {
     open,
     close,
     newSub,
+    newNote,
     rename,
     toggleFavorite,
     exportCategory,

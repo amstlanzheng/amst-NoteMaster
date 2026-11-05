@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { Category, Note } from '@shared/types'
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useUiStore } from '../../stores/ui'
 import { useNoteStore } from '../../stores/note'
@@ -80,6 +80,28 @@ function toggleExpand(event: Event) {
     saveExpandedState()
   }
 }
+
+// 目标分类是否位于当前分类的子树内（含自身）
+function containsCategory(cat: Category, targetId: number): boolean {
+  if (cat.id === targetId) return true
+  return (cat.children || []).some((child) => containsCategory(child, targetId))
+}
+
+// 定位当前文件：目标文件在自身子树内时自动展开，保证目标行能被渲染出来
+watch(
+  () => uiStore.locateSignal,
+  () => {
+    const noteId = uiStore.locateNoteId
+    if (noteId == null) return
+    const target = noteTreeStore.treeNotes.find((n) => n.id === noteId)
+    const targetCatId = target?.category_id
+    if (targetCatId == null) return
+    if (!isExpanded.value && containsCategory(props.category, targetCatId)) {
+      isExpanded.value = true
+      saveExpandedState()
+    }
+  }
+)
 
 function selectCategory(catId: number) {
   emit('select-category', catId)
@@ -257,6 +279,7 @@ async function handleExternalFileDrop(filePath: string, categoryId: number) {
       :key="note.id"
       class="file-row"
       :class="{ active: noteStore.currentNote?.id === note.id }"
+      :data-note-id="note.id"
       :style="{ paddingLeft: (50 + depth * 20) + 'px' }"
       @click.stop="openNote(note)"
       @contextmenu="noteMenu.open($event, note)"
@@ -358,6 +381,21 @@ async function handleExternalFileDrop(filePath: string, categoryId: number) {
 .file-row.active {
   background: var(--active-bg);
   color: var(--accent-color);
+}
+/* 定位时短暂高亮目标文件 */
+.file-row.locate-flash {
+  animation: locate-flash 1.4s ease;
+}
+@keyframes locate-flash {
+  0%,
+  60% {
+    background: var(--el-color-primary-light-8, rgba(64, 158, 255, 0.18));
+    box-shadow: inset 0 0 0 1px var(--accent-color, #409eff);
+  }
+  100% {
+    background: transparent;
+    box-shadow: none;
+  }
 }
 .file-icon {
   font-size: 14px;

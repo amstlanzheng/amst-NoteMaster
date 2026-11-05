@@ -2,6 +2,8 @@ import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
 import type { Note, FilterOptions } from '@shared/types'
 import { useUiStore } from './ui'
+import { useNoteTreeStore } from './noteTree'
+import { useCategoryStore } from './category'
 
 export const useNoteStore = defineStore('note', () => {
   const notes = ref<Note[]>([])
@@ -58,7 +60,12 @@ export const useNoteStore = defineStore('note', () => {
 
   async function createNote(data: Partial<Note>) {
     const id = await window.api.createNote(toPlain(data))
-    await fetchNotes()
+    // 同步左侧分类树与分类文件计数，否则新笔记不会出现在侧边栏
+    await Promise.all([
+      fetchNotes(),
+      useNoteTreeStore().fetchTreeNotes(true),
+      useCategoryStore().fetchCategories()
+    ])
     return id
   }
 
@@ -66,6 +73,11 @@ export const useNoteStore = defineStore('note', () => {
     await window.api.updateNote(id, toPlain(data))
     if (currentNote.value?.id === id) {
       currentNote.value = { ...currentNote.value, ...data }
+    }
+    // 标题 / 分类 / 收藏 / 置顶变化需即时反映到左侧文件树
+    useNoteTreeStore().patchNote(id, data)
+    if (data.category_id !== undefined) {
+      await useCategoryStore().fetchCategories()
     }
     await fetchNotes()
   }
@@ -75,7 +87,8 @@ export const useNoteStore = defineStore('note', () => {
     if (currentNote.value?.id === id) {
       currentNote.value = null
     }
-    await fetchNotes()
+    useNoteTreeStore().removeNotes([id])
+    await Promise.all([fetchNotes(), useCategoryStore().fetchCategories()])
   }
 
   async function batchDeleteNotes(ids: number[], permanent?: boolean) {
@@ -83,12 +96,17 @@ export const useNoteStore = defineStore('note', () => {
     if (currentNote.value && ids.includes(currentNote.value.id)) {
       currentNote.value = null
     }
-    await fetchNotes()
+    useNoteTreeStore().removeNotes(ids)
+    await Promise.all([fetchNotes(), useCategoryStore().fetchCategories()])
   }
 
   async function duplicateNote(id: number) {
     await window.api.duplicateNote(id)
-    await fetchNotes()
+    await Promise.all([
+      fetchNotes(),
+      useNoteTreeStore().fetchTreeNotes(true),
+      useCategoryStore().fetchCategories()
+    ])
   }
 
   function setFilters(filter: FilterOptions) {

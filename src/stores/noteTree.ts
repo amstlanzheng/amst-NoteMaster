@@ -28,7 +28,6 @@ export const useNoteTreeStore = defineStore('noteTree', () => {
   })
 
   async function fetchTreeNotes(force = false) {
-    if (loading.value) return
     if (loaded.value && !force) return
     loading.value = true
     try {
@@ -47,12 +46,50 @@ export const useNoteTreeStore = defineStore('noteTree', () => {
     return notesByCategory.value.get(catId ?? null) || []
   }
 
+  /** 本地时间戳，格式与 SQLite 的 datetime('now','localtime') 保持一致 */
+  function localNow(): string {
+    const d = new Date()
+    const pad = (n: number) => String(n).padStart(2, '0')
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+  }
+
+  /**
+   * 笔记字段变更后同步树内缓存（不重新查库，也不缓存正文）。
+   * 用于标题编辑、移动分类、收藏/置顶等高频操作。
+   */
+  function patchNote(id: number, data: Partial<Note>) {
+    if (!loaded.value) return
+    const note = treeNotes.value.find((n) => n.id === id)
+    if (!note) return
+    if (data.title !== undefined) note.title = data.title
+    if (data.content_type !== undefined) note.content_type = data.content_type
+    if (data.category_id !== undefined) note.category_id = data.category_id
+    if (data.is_favorite !== undefined) note.is_favorite = data.is_favorite
+    if (data.is_pinned !== undefined) note.is_pinned = data.is_pinned
+    if (data.title !== undefined || data.content !== undefined) note.updated_at = localNow()
+  }
+
+  /** 笔记删除后从树内缓存移除，避免左侧仍显示已删文件 */
+  function removeNotes(ids: number[]) {
+    if (!loaded.value || ids.length === 0) return
+    const set = new Set(ids)
+    treeNotes.value = treeNotes.value.filter((n) => !set.has(n.id))
+  }
+
+  /** 强制重新拉取树内文件（新建、复制等无法本地补齐的场景） */
+  async function refresh() {
+    await fetchTreeNotes(true)
+  }
+
   return {
     treeNotes,
     loaded,
     loading,
     notesByCategory,
     fetchTreeNotes,
-    getNotesByCategory
+    getNotesByCategory,
+    patchNote,
+    removeNotes,
+    refresh
   }
 })

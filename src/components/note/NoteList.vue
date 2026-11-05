@@ -176,6 +176,29 @@ function selectNote(note: Note) {
   noteStore.currentNote = note
 }
 
+// 定位当前文件：滚动到列表中的目标卡片并短暂高亮
+function scrollToNoteCard(noteId: number, attempt = 0) {
+  const el = document.querySelector(`.note-card[data-note-id="${noteId}"]`) as HTMLElement | null
+  if (!el) {
+    if (attempt < 20) {
+      setTimeout(() => scrollToNoteCard(noteId, attempt + 1), 30)
+    }
+    return
+  }
+  el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  el.classList.add('locate-flash')
+  setTimeout(() => el.classList.remove('locate-flash'), 1400)
+}
+
+watch(
+  () => uiStore.locateSignal,
+  () => {
+    const noteId = uiStore.locateNoteId
+    if (noteId == null) return
+    scrollToNoteCard(noteId)
+  }
+)
+
 async function handleNewNote() {
   try {
     const id = await noteStore.createNote({
@@ -379,6 +402,7 @@ async function goBackToPrevNote() {
         <template v-else>
         <div v-for="note in sortedNotes" :key="note.id"
           class="note-card"
+          :data-note-id="note.id"
           :class="{ active: noteStore.currentNote?.id === note.id, pinned: note.is_pinned, 'list-mode': uiStore.noteViewMode === 'list' }"
           :draggable="!batchMode"
           @click="batchMode ? toggleSelect(note, $event) : selectNote(note)"
@@ -469,6 +493,12 @@ async function goBackToPrevNote() {
 .note-card { padding: 12px 14px; cursor: pointer; border-bottom: 1px solid var(--border-color); transition: background 0.15s ease; user-select: none; display: flex; align-items: flex-start; gap: 10px; }
 .note-card:hover { background: var(--hover-bg); }
 .note-card.active { background: var(--active-bg); border-left: 3px solid var(--accent-color); padding-left: 11px; }
+/* 定位时短暂高亮目标卡片 */
+.note-card.locate-flash { animation: locate-flash 1.4s ease; }
+@keyframes locate-flash {
+  0%, 60% { background: rgba(64, 158, 255, 0.18); box-shadow: 0 0 0 1px var(--accent-color); }
+  100% { background: transparent; box-shadow: none; }
+}
 .card-icon { flex-shrink: 0; width: 32px; height: 32px; border-radius: 8px; background: rgba(64, 158, 255, 0.08); display: flex; align-items: center; justify-content: center; margin-top: 1px; }
 .card-icon .el-icon { font-size: 16px; color: var(--accent-color); }
 .note-card.active .card-icon { background: rgba(64, 158, 255, 0.15); }
